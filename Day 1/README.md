@@ -138,78 +138,6 @@ The **prompt** is the set of instructions that shapes how the model behaves. It 
 
 > See [docs/prompt-examples.md](docs/prompt-examples.md) for concrete examples.
 
-### b) Model
-
-The **model** (LLM) is the agent's brain — the reasoning engine.
-
-- **LLM's role inside an agent** — it interprets the user's intent, decides whether a tool is needed, picks *which* tool, fills in the arguments, and writes the final natural-language answer.
-- **Reasoning and decision making** — modern LLMs can break a request into steps ("first find the employee, then fetch their leave balance, then format the answer"). This planning ability is what makes agents possible.
-
-| Model concern | Why it matters |
-|---|---|
-| **Capability** | More capable models reason and plan better. |
-| **Latency** | Users expect fast replies; pick a model sized to the task. |
-| **Cost** | Larger models cost more per call; balance against accuracy. |
-| **Context window** | Determines how much memory/history you can include. |
-
-### c) Tools
-
-**Tools** are the functions and APIs the agent can call to *do things* in the real world.
-
-- **What are AI agent tools?** — well-defined functions exposed to the model, each with a name, a description, and an input schema. Example: `getEmployeeDetails(employeeId)`.
-- **Function calling** — the model doesn't run code itself. Instead it outputs a structured request like `{ "tool": "getLeaveBalance", "args": { "employeeId": "E123" } }`. Your application executes the function and returns the result to the model.
-- **API integrations** — tools are typically thin wrappers around your existing REST APIs, databases, or third-party services.
-- **Examples for HRMS:**
-  - `getEmployeeDetails()` — fetch a profile
-  - `getAttendance()` — read attendance records
-  - `getLeaveBalance()` — check remaining leave
-  - `applyLeave()` — submit a leave request
-  - `getCompanyPolicy()` — retrieve HR policy text
-
-> See [docs/api-tool-map.md](docs/api-tool-map.md) for the full tool catalogue.
-
-### d) Memory
-
-Memory lets the agent stay coherent across a conversation and across sessions.
-
-| Type | What it stores | Lifespan | Example |
-|---|---|---|---|
-| **Short-term memory** | The current conversation turns | Single session | Remembering you just asked about *casual* leave when you follow up with "and sick leave?" |
-| **Long-term memory** | Durable facts and preferences | Across sessions | Remembering your employee ID, manager, or that you prefer answers in a specific format |
-| **Conversation history** | The running transcript fed back into the model | Per session (windowed) | Lets the agent resolve "approve *it*" to the leave request mentioned two messages ago |
-
-> Long-term memory is commonly backed by a **vector database** so the agent can semantically recall relevant past information.
-
-### e) Evaluation
-
-You cannot improve what you don't measure. **Evaluation** verifies the agent behaves correctly.
-
-- **Why evaluation is needed** — LLMs are non-deterministic; the same question can yield different answers. Evaluation catches regressions and unsafe behavior before users do.
-- **Accuracy checking** — compare the agent's answers and tool calls against a curated set of expected outputs ("golden" test cases).
-- **Testing agent responses** — check for: *Did it pick the right tool? Did it pass the right arguments? Is the answer factually grounded? Did it respect access rules (e.g. not leak another person's data)?*
-
-| Evaluation type | Question it answers |
-|---|---|
-| **Tool-selection accuracy** | Did the agent call the correct tool? |
-| **Argument correctness** | Were the tool inputs right? |
-| **Answer quality** | Is the response accurate, complete, and well-formatted? |
-| **Safety / policy** | Did it refuse out-of-scope or unauthorized requests? |
-
-### f) Logging & Monitoring
-
-Logging makes the agent's behavior **observable** — essential for debugging and trust.
-
-- **Tracking agent decisions** — record every step: the prompt, the model's reasoning, which tool was chosen, the arguments, the tool result, and the final answer.
-- **Debugging** — when an answer is wrong, traces let you pinpoint *where* it went wrong (bad reasoning? wrong tool? bad data?).
-- **Improving agent performance** — aggregated logs reveal patterns: common failure modes, slow tools, frequently asked questions worth optimizing.
-
-| Log signal | Used for |
-|---|---|
-| **Traces** (step-by-step) | Debugging a single conversation |
-| **Latency metrics** | Finding slow tools/models |
-| **Error rates** | Reliability monitoring & alerting |
-| **Usage analytics** | Product decisions & cost control |
-
 ---
 
 ## 4. HRMS AI Agent Business Scenario
@@ -226,20 +154,6 @@ The HRMS AI Agent can:
 - 🕒 **Provide attendance information** — "How many days was I present last month?", "Show my late check-ins."
 - 🧑‍💼 **Assist HR teams** — look up employees, generate attendance summaries, support leave approvals, surface analytics.
 - ⚙️ **Automate repetitive workflows** — turn multi-step manual processes into a single natural-language request.
-
-**Example interaction:**
-
-```
-Employee: How many casual leaves do I have, and can I take Friday off?
-
-Agent:    You currently have 6 casual leaves remaining.
-          I can apply 1 casual leave for Friday, 6 June 2026 — shall I submit it?
-
-Employee: Yes, please.
-
-Agent:    ✅ Done. Your leave request for 6 June 2026 has been submitted
-          and is pending approval from your manager (Priya Sharma).
-```
 
 > Full requirements are documented in [docs/agent-requirements.md](docs/agent-requirements.md).
 
