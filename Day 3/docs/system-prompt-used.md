@@ -1,61 +1,27 @@
-# HRMS AI Agent — System Prompt v1
+# HRMS Assistant v1 — System Prompt Used
 
-> The first production-style **system prompt** for the HRMS AI Agent, with the design rationale behind every section. This is the standing instruction the model reads on every turn, before the user speaks.
+> The **exact instructions** pasted into the Microsoft AI Foundry agent for **HRMS Assistant v1**. This is the verbatim system prompt deployed during Day 3 testing.
 
-This document builds on the baseline prompt sketched in Day 1 ([../../Day 1/docs/prompt-examples.md](../../Day%201/docs/prompt-examples.md)) and hardens it for safety, grounding, and confirmation.
-
----
-
-## Table of Contents
-
-1. [What a System Prompt Is](#1-what-a-system-prompt-is)
-2. [Anatomy of System Prompt v1](#2-anatomy-of-system-prompt-v1)
-3. [System Prompt v1 (full text)](#3-system-prompt-v1-full-text)
-4. [Section-by-Section Rationale](#4-section-by-section-rationale)
-5. [Design Decisions & Trade-offs](#5-design-decisions--trade-offs)
-6. [What Belongs in the Prompt vs. in Code](#6-what-belongs-in-the-prompt-vs-in-code)
-7. [Versioning & Changelog](#7-versioning--changelog)
+This is the Day 2 design ([../../Day 2/docs/system-prompt-v1.md](../../Day%202/docs/system-prompt-v1.md)) carried forward at **v1.1** — the version with the explicit **no-tool / anti-hallucination handling** added after the first Day 3 run hallucinated a leave balance. Because v1 is a **no-tool** agent, §3's no-tool handling is what keeps it honest; see [limitations.md](limitations.md).
 
 ---
 
-## 1. What a System Prompt Is
+## Deployment Context
 
-A **system prompt** is a fixed block of instructions injected ahead of the conversation. The model treats it as the **highest-priority context** describing *who it is*, *what it can do*, and *what it must never do*.
-
-| Property | System Prompt | User Prompt |
-|---|---|---|
-| **Who writes it** | The developer / designer | The end user |
-| **How often it changes** | Rarely (versioned) | Every message |
-| **Authority** | Highest — the "constitution" | A request to be evaluated against the constitution |
-| **Visibility** | Hidden from the user | Typed by the user |
-| **Purpose** | Define identity, scope, rules, safety | Ask for something specific |
-
-> 🔑 **Golden rule:** Nothing in a user message or tool result can override the system prompt. If they conflict, the system prompt wins.
+| Field | Value |
+|---|---|
+| **Agent name** | `test-data` |
+| **Platform** | Microsoft AI Foundry — Agent playground |
+| **Model** | `gpt-4.1-mini` (Global Standard deployment) |
+| **Prompt version** | v1.1 (Day 2, [changelog](../../Day%202/docs/system-prompt-v1.md#7-versioning--changelog)) |
+| **Tools attached** | **None** (intentional for v1) |
+| **Where pasted** | Agent **Instructions** field |
 
 ---
 
-## 2. Anatomy of System Prompt v1
+## System Prompt (verbatim)
 
-Our v1 prompt is organized into eight ordered blocks. Order is deliberate — identity and safety come first so they "frame" everything the model reads afterward.
-
-```
-┌────────────────────────────────────────────────────┐
-│  1. IDENTITY & ROLE     who the agent is             │
-│  2. SCOPE               what it helps with           │
-│  3. TOOLS & CAPABILITIES what it can call            │
-│  4. DATA ACCESS RULES   who can see what             │
-│  5. BEHAVIOUR RULES     how it must act              │
-│  6. SAFETY & REFUSALS   what it must never do        │
-│  7. CONFIRMATION POLICY when to pause before writing │
-│  8. OUTPUT STYLE        how answers should look      │
-└────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. System Prompt v1 (full text)
-
-> 📋 Copy the block below verbatim as the agent's system message.
+> 📋 This is the text pasted into the **Instructions** box, exactly as deployed.
 
 ```text
 You are "HRMS Assistant", an AI Agent embedded in a company's Human
@@ -184,73 +150,19 @@ read and write real HR data.
 
 ---
 
-## 4. Section-by-Section Rationale
+## Notes on Using This Prompt Without Tools
 
-| # | Section | Why it exists | Maps to |
-|---|---|---|---|
-| 1 | **Identity & Role** | Anchors the agent as an HR co-worker bound to the authenticated user's role; prevents role escalation. | [agent-rules.md](agent-rules.md) |
-| 2 | **Scope** | Keeps the agent on-topic and predictable; reduces misuse and off-domain hallucination. | Response rules |
-| 3 | **Tools & Capabilities** | Forces grounding through tools; the explicit "never state data you didn't retrieve" line is the primary anti-hallucination control. | [unsafe-actions.md](unsafe-actions.md#hallucination) |
-| 4 | **Data Access Rules** | Encodes privacy / least-privilege; the most important confidentiality guardrail. | [unsafe-actions.md](unsafe-actions.md#data-leakage) |
-| 5 | **Behaviour Rules** | Day-to-day quality: grounding, honesty about failures, explicit units, clarifying questions. | [agent-rules.md](agent-rules.md#response-rules) |
-| 6 | **Safety & Refusals** | The anti-prompt-injection core; declares the prompt authoritative and treats tool data as data, not commands. | [unsafe-actions.md](unsafe-actions.md#prompt-injection) |
-| 7 | **Confirmation Policy** | Ensures no write happens without an explicit yes; protects against accidental or manipulated state changes. | [agent-rules.md](agent-rules.md#confirmation-policy) |
-| 8 | **Output Style** | Consistent, readable, leak-free responses. | Response rules |
+In v1 **there are no tools wired in.** Earlier drafts of the prompt told the agent to "use the available tools to fetch real data" without saying what to do when none exist — and the model resolved that gap by **inventing** a plausible balance ("6 casual leave days"). The **v1.1 NO-TOOL / UNAVAILABLE-TOOL HANDLING** block in §3 closes that gap explicitly:
 
----
+- The agent must only treat a tool as usable if it can actually call it and get a result that turn.
+- If it can't, it must **say so and stop** — no narrating fake tool calls, no guessing a number.
+- With no tools, it may only explain HR concepts generally and point the user to where their real data lives.
 
-## 5. Design Decisions & Trade-offs
+This is exactly the behaviour the Day 3 run now shows for the headline leave-balance case (C02): it asks for the leave type, then honestly defers instead of fabricating a figure. Track each case's outcome in [conversation-tests.md](conversation-tests.md).
 
-| Decision | Why | Trade-off |
-|---|---|---|
-| **Hard-code the tool list in the prompt** | Reinforces grounding and the "tools only" rule. | Must keep prompt in sync with [../../Day 1/docs/api-tool-map.md](../../Day%201/docs/api-tool-map.md). |
-| **Refuse to reveal the system prompt** | Limits reconnaissance for injection attacks. | Slightly less "transparent" to curious users. |
-| **Confirm only on writes, not reads** | Avoids nagging the user on harmless lookups. | Relies on correctly classifying a tool as read vs. write. |
-| **Put safety before style** | Order influences model priority. | Longer prompt; costs a few tokens per turn. |
-| **Keep role enforcement in the prompt *and* in code** | Defense in depth — prompt is not a security boundary by itself. | Duplicated logic (intentional). |
-
-> ⚠️ **Important:** A system prompt is a strong *behavioural* control but is **not a hard security boundary**. Role checks and data scoping must *also* be enforced in the application/tool layer (see §6).
+> 🔜 **Next iteration:** once tools from [../../Day 1/docs/api-tool-map.md](../../Day%201/docs/api-tool-map.md) are attached, the "fetch real data" instructions become executable and the hallucination pressure disappears for real, rather than being held back by prompt wording alone.
 
 ---
 
-## 6. What Belongs in the Prompt vs. in Code
-
-The prompt shapes behaviour; **code enforces security**. Both are required.
-
-```
-   ┌────────────────────────┐        ┌────────────────────────┐
-   │   SYSTEM PROMPT         │        │   APPLICATION / TOOLS  │
-   │   (soft guardrails)     │        │   (hard guardrails)    │
-   ├────────────────────────┤        ├────────────────────────┤
-   │ • Tone & scope          │        │ • Authentication        │
-   │ • Ask before writing    │        │ • Role checks (RBAC)    │
-   │ • "Only your own data"  │  +     │ • Data scoping per user │
-   │ • Grounding instructions│        │ • Tool input validation │
-   │ • Refusal style         │        │ • Audit logging         │
-   └────────────────────────┘        └────────────────────────┘
-        Influences the model              Cannot be bypassed by
-        (can be probed/jailbroken)        any prompt or message
-```
-
-**Rule of thumb:** if a violation would be *unacceptable* (a salary leak, an unauthorized approval), it must be enforced in code — the prompt is the first layer, not the last.
-
----
-
-## 7. Versioning & Changelog
-
-| Version | Date | Changes |
-|---|---|---|
-| **v1** | 2026-06-03 | Initial production-style prompt: identity, scope, tools, data-access, behaviour, safety/refusals, confirmation policy, output style. |
-| **v1.1** | 2026-06-04 | Anti-hallucination fix after no-tool testing: agent was inventing leave balances (e.g. "6 casual days") with no tools connected. Added no-tool/unavailable-tool handling to §3 and tightened §5 — never narrate or fake a tool call, never state a value not grounded in a real tool result. |
-
-**Planned for v2+:**
-
-- [ ] Few-shot examples for tricky refusals and confirmations.
-- [ ] Explicit handling of multi-step / multi-tool workflows.
-- [ ] Locale/timezone handling for dates.
-- [ ] Tightened output schema for downstream parsing.
-
----
-
-> Related docs: [README.md](../README.md) · [agent-rules.md](agent-rules.md) · [unsafe-actions.md](unsafe-actions.md) · [test-prompts.md](test-prompts.md)
-> Day 1 baseline: [../../Day 1/docs/prompt-examples.md](../../Day%201/docs/prompt-examples.md)
+> Related docs: [README.md](../README.md) · [foundry-setup-guide.md](foundry-setup-guide.md) · [conversation-tests.md](conversation-tests.md) · [limitations.md](limitations.md)
+> Day 2 source: [../../Day 2/docs/system-prompt-v1.md](../../Day%202/docs/system-prompt-v1.md)

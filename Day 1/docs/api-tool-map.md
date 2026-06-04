@@ -32,7 +32,3 @@
 > Tools marked *(HR)* require an `HR_MANAGER` or `ADMIN` role.
 
 ---
-
-## 2. Tool Reference
-
-... (file continues unchanged)
