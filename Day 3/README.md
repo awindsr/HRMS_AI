@@ -145,22 +145,12 @@ This is the **key insight of Day 3.** With no tools, the agent **cannot touch re
 
 ---
 
-## 5. The Big Picture: Where v1 Sits
-
-```
- Day 1        Day 2             Day 3            Day 4+ (next)
- ─────        ─────             ─────            ────────────
- Concepts  →  Prompt & safety → Running agent  →  Add TOOLS
- (theory)     (design)          (no tools)        (real data)
-
-                                 ▲ you are here
-```
 
 Day 3 proves the **prompt and personality work**. It also makes the **gap obvious**: without tools the agent is a talker, not a doer. That gap is exactly what motivates wiring in the tools from [Day 1's api-tool-map](../Day%201/docs/api-tool-map.md) next.
 
 ---
 
-## 6. Repository Structure
+## 5. Repository Structure
 
 ```
 Day 3/
