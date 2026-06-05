@@ -1,0 +1,177 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "HRMS API",
+    "description": "Read-only access to the HRMS employee directory and task list.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://bh9sb398-5047.inc1.devtunnels.ms",
+      "description": "Public HTTPS endpoint (dev tunnel, ngrok, or deployed app). NOT localhost."
+    }
+  ],
+  "paths": {
+    "/api/v1/employees": {
+      "get": {
+        "operationId": "getEmployeeList",
+        "summary": "List employees in the company directory, optionally filtered by department or status.",
+        "description": "Use when the user asks who is in a team, wants a roster/headcount, or asks who works in a department. Read-only.",
+        "parameters": [
+          {
+            "name": "department",
+            "in": "query",
+            "required": false,
+            "description": "Filter by department, e.g. 'engineering', 'sales', 'product'. Omit for all.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by employment status. Omit for all.",
+            "schema": { "type": "string", "enum": ["active", "on_leave", "inactive"] }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Max records to return (1-100). Defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A list of employees.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": { "type": "integer" },
+                    "employees": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Employee" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/employees/{id}": {
+      "get": {
+        "operationId": "getEmployeeDetails",
+        "summary": "Fetch the full profile of one employee by ID.",
+        "description": "Use when the user asks about a specific person's details. Read-only.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The employee ID to look up, e.g. 'E1001'.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The employee profile.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Employee" }
+              }
+            }
+          },
+          "404": {
+            "description": "No employee with that ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "employeeId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "operationId": "getTaskList",
+        "summary": "List work tasks, optionally filtered by employee and/or status.",
+        "description": "Use when the user asks what they (or a named employee) are working on. Read-only.",
+        "parameters": [
+          {
+            "name": "employeeId",
+            "in": "query",
+            "required": false,
+            "description": "Filter tasks to a single employee by ID, e.g. 'E1001'. Omit for all.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by task status. Omit for all.",
+            "schema": { "type": "string", "enum": ["open", "in_progress", "done", "blocked"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A list of tasks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": { "type": "integer" },
+                    "tasks": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/EmployeeTask" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Employee": {
+        "type": "object",
+        "properties": {
+          "employeeId": { "type": "string" },
+          "fullName": { "type": "string" },
+          "email": { "type": "string" },
+          "jobTitle": { "type": "string" },
+          "department": { "type": "string" },
+          "managerId": { "type": "string", "nullable": true },
+          "location": { "type": "string" },
+          "status": { "type": "string" },
+          "joinDate": { "type": "string", "format": "date" }
+        }
+      },
+      "EmployeeTask": {
+        "type": "object",
+        "properties": {
+          "taskId": { "type": "string" },
+          "employeeId": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string" },
+          "priority": { "type": "string" },
+          "dueDate": { "type": "string", "format": "date" }
+        }
+      }
+    }
+  }
+}
