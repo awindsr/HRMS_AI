@@ -60,12 +60,20 @@ public sealed class AzureOpenAiAgent
 
         string? Str(string k) => root.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         int? Int(string k) => root.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
+        bool Bool(string k) => root.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
 
         return name switch
         {
+            // reads (Day 5)
             "getEmployeeList"    => await _tools.GetEmployeeListAsync(Str("department"), Str("status"), Int("limit")),
             "getEmployeeDetails" => await _tools.GetEmployeeDetailsAsync(Str("employeeId") ?? ""),
             "getTaskList"        => await _tools.GetTaskListAsync(Str("employeeId"), Str("status")),
+            "getTaskDetails"     => await _tools.GetTaskDetailsAsync(Str("taskId") ?? ""),
+            // writes (Day 6) — confirmation enforced inside each tool
+            "createTask"     => await _tools.CreateTaskAsync(Str("title") ?? "", Str("description"), Str("assigneeId"), Str("priority"), Str("dueDate"), Bool("confirmed")),
+            "assignTask"     => await _tools.AssignTaskAsync(Str("taskId") ?? "", Str("assigneeId") ?? "", Bool("confirmed")),
+            "markAttendance" => await _tools.MarkAttendanceAsync(Str("employeeId") ?? "", Str("date"), Str("status") ?? "", Str("checkIn"), Str("checkOut"), Str("note"), Bool("confirmed")),
+            "deleteTask"     => await _tools.DeleteTaskAsync(Str("taskId") ?? "", Str("confirmationToken")),
             _ => JsonSerializer.Serialize(new { error = "unknown_tool", message = $"No tool named {name}." })
         };
     }

@@ -5,6 +5,11 @@
 # Logs
 Logs/
 
+# SQLite mock database (recreated & seeded on every startup)
+*.db
+*.db-shm
+*.db-wal
+
 # Generated files
 project.lock.json
 .vs/

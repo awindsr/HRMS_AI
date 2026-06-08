@@ -2,13 +2,13 @@
   "openapi": "3.0.1",
   "info": {
     "title": "HRMS API",
-    "description": "Read-only access to the HRMS employee directory and task list.",
-    "version": "1.0.0"
+    "description": "Access to the HRMS employee directory, task list, and attendance. Read operations (GET) are safe; write operations (POST/PATCH/DELETE) change data and must be confirmed with the user before they are called.",
+    "version": "2.0.0"
   },
   "servers": [
     {
-      "url": "https://bh9sb398-5047.inc1.devtunnels.ms",
-      "description": "Public HTTPS endpoint (dev tunnel, ngrok, or deployed app). NOT localhost."
+      "url": "https://47rr5qkl-5047.inc1.devtunnels.ms",
+      "description": "Public HTTPS port-forward host (dev tunnel). Use the plain '<id>-<port>' host, NOT the '-inspect' diagnostics host (that one requires AAD login and returns a 302). NOT localhost."
     }
   ],
   "paths": {
@@ -141,6 +141,152 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "createTask",
+        "summary": "Create a new work task, optionally assigned to an employee.",
+        "description": "WRITE ACTION. Before calling, summarize the task (title, assignee, priority, due date) and get the user's explicit confirmation. If an assignee is given, they are notified. Reversible via deleteTask.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created task.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateTaskResult" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (e.g. missing title)."
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{taskId}/assignment": {
+      "patch": {
+        "operationId": "assignTask",
+        "summary": "Assign or re-assign an existing task to an employee.",
+        "description": "WRITE ACTION that notifies the new assignee (and the previous one on re-assignment). Before calling, show the task, its current assignee, and the new assignee, and get explicit confirmation.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "ID of the task to assign, e.g. 'T-501'.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "assigneeId": { "type": "string", "description": "Employee ID of the new assignee, e.g. 'E1002'." }
+                },
+                "required": ["assigneeId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated assignment.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AssignTaskResult" }
+              }
+            }
+          },
+          "404": { "description": "No task with that ID." }
+        }
+      }
+    },
+    "/api/v1/tasks/{taskId}": {
+      "get": {
+        "operationId": "getTaskDetails",
+        "summary": "Fetch one task by its ID.",
+        "description": "Use this to look up a task yourself (title, current assignee, status, priority, due date) before assigning or deleting it. Never ask the user for details you can fetch here. Read-only.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "The task ID to look up, e.g. 'T-504'.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The task.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EmployeeTask" }
+              }
+            }
+          },
+          "404": { "description": "No task with that ID." }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTask",
+        "summary": "Permanently delete a task. DESTRUCTIVE and IRREVERSIBLE.",
+        "description": "WRITE ACTION, HR/Admin only. Before calling, fetch and show the task's details, state plainly that deletion cannot be undone, and have the user re-type the exact task ID to confirm. Delete only one task per call; never bulk delete.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "ID of the single task to delete, e.g. 'T-501'.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deletion result.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteTaskResult" }
+              }
+            }
+          },
+          "404": { "description": "No task with that ID." }
+        }
+      }
+    },
+    "/api/v1/attendance": {
+      "post": {
+        "operationId": "markAttendance",
+        "summary": "Record an attendance entry for an employee on a date.",
+        "description": "WRITE ACTION that can affect payroll. Employees may mark only their own attendance for today; another employee or a past date is an HR regularization. Confirm the employee, date, and status before calling. Future dates are rejected.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MarkAttendanceRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The recorded attendance entry.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MarkAttendanceResult" }
+              }
+            }
+          },
+          "400": { "description": "Invalid request (e.g. missing status)." },
+          "404": { "description": "No employee with that ID." }
+        }
       }
     }
   },
@@ -170,6 +316,76 @@
           "status": { "type": "string" },
           "priority": { "type": "string" },
           "dueDate": { "type": "string", "format": "date" }
+        }
+      },
+      "CreateTaskRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "description": "Short, action-oriented task title. Required." },
+          "description": { "type": "string", "description": "Optional longer detail." },
+          "assigneeId": { "type": "string", "description": "Employee ID to assign to, e.g. 'E1001'. Omit to leave unassigned." },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"], "description": "Defaults to medium." },
+          "dueDate": { "type": "string", "format": "date", "description": "YYYY-MM-DD, today or later." }
+        },
+        "required": ["title"]
+      },
+      "CreateTaskResult": {
+        "type": "object",
+        "properties": {
+          "taskId": { "type": "string" },
+          "title": { "type": "string" },
+          "assigneeId": { "type": "string", "nullable": true },
+          "status": { "type": "string" },
+          "priority": { "type": "string" },
+          "dueDate": { "type": "string", "format": "date" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "notificationSent": { "type": "boolean" }
+        }
+      },
+      "AssignTaskResult": {
+        "type": "object",
+        "properties": {
+          "taskId": { "type": "string" },
+          "title": { "type": "string" },
+          "previousAssigneeId": { "type": "string", "nullable": true },
+          "newAssigneeId": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "notificationSent": { "type": "boolean" }
+        }
+      },
+      "DeleteTaskResult": {
+        "type": "object",
+        "properties": {
+          "taskId": { "type": "string" },
+          "deleted": { "type": "boolean" },
+          "deletedAt": { "type": "string", "format": "date-time" },
+          "deletedBy": { "type": "string" }
+        }
+      },
+      "MarkAttendanceRequest": {
+        "type": "object",
+        "properties": {
+          "employeeId": { "type": "string", "description": "Employee whose attendance is recorded, e.g. 'E1002'." },
+          "date": { "type": "string", "format": "date", "description": "YYYY-MM-DD. Defaults to today. Future dates rejected." },
+          "status": { "type": "string", "enum": ["present", "absent", "wfh", "leave", "half_day"] },
+          "checkIn": { "type": "string", "description": "Optional check-in time HH:mm." },
+          "checkOut": { "type": "string", "description": "Optional check-out time HH:mm; must be after checkIn." },
+          "note": { "type": "string", "description": "Optional reason / regularization note." }
+        },
+        "required": ["employeeId", "status"]
+      },
+      "MarkAttendanceResult": {
+        "type": "object",
+        "properties": {
+          "attendanceId": { "type": "string" },
+          "employeeId": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "status": { "type": "string" },
+          "checkIn": { "type": "string", "nullable": true },
+          "checkOut": { "type": "string", "nullable": true },
+          "recordedBy": { "type": "string" },
+          "recordedAt": { "type": "string", "format": "date-time" },
+          "wasOverwrite": { "type": "boolean" }
         }
       }
     }
