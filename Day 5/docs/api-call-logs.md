@@ -67,4 +67,14 @@ For the Day 5 writeup, point to:
 
 ---
 
+## 5. Trace Evidence (Tool Execution)
+
+The local `[API]` log lines above cover the offline test runner. The hosted **Azure AI Foundry** agent records the same tool calls in its trace viewer — each `execute_tool` span is one outbound HRMS API call made by the model during a live `--chat`-style turn:
+
+![Foundry trace: getEmployeeDetails (2.38s) and getTaskList (1.94s) tool execution](screenshots/Screenshot%202026-06-05%20162102.png)
+
+The two `execute_tool` spans — `getEmployeeDetails` (2.38s) and `getTaskList` (1.94s) — line up with the happy-path GET calls in §2, confirming the function-calling loop drives real API traffic. See [test-results.md §5](test-results.md#5-captured-evidence-azure-ai-foundry) for the matching chat captures.
+
+---
+
 > Related docs: [build-guide.md](build-guide.md) · [error-handling-notes.md](error-handling-notes.md) · [test-results.md](test-results.md)
