@@ -51,6 +51,11 @@ public sealed class ToolsTestController : ControllerBase
             await Case("deleteTask (bare yes -> blocked)",      () => _tools.DeleteTaskAsync("T-505", confirmationToken: "yes")),
             await Case("deleteTask (token matches -> deleted)",  () => _tools.DeleteTaskAsync("T-505", confirmationToken: "T-505")),
             await Case("deleteTask (already gone -> 404)",      () => _tools.DeleteTaskAsync("T-505", confirmationToken: "T-505")),
+
+            await Case("updateTaskStatus (unconfirmed -> blocked)",  () => _tools.UpdateTaskStatusAsync("T-501", "in_progress", confirmed: false)),
+            await Case("updateTaskStatus (confirmed -> updated)",    () => _tools.UpdateTaskStatusAsync("T-501", "in_progress", confirmed: true)),
+            await Case("updateTaskStatus (bad status -> rejected)",  () => _tools.UpdateTaskStatusAsync("T-501", "urgent", confirmed: true)),
+
         };
 
         return Content(

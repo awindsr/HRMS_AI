@@ -129,6 +129,23 @@ public sealed class HrmsTools
         return res.Ok ? Json(res.Data) : ErrorJson(res);
     }
 
+    public async Task<string> UpdateTaskStatusAsync(string taskId, string newStatus, bool confirmed)
+    {
+        if (!confirmed) return ConfirmationRequired("updateTaskStatus");
+
+        if (string.IsNullOrWhiteSpace(taskId)) return MissingArg("taskId");
+        if (string.IsNullOrWhiteSpace(newStatus)) return MissingArg("newStatus");
+        if (!TaskStatuses.Contains(newStatus, StringComparer.OrdinalIgnoreCase))
+            return InvalidArg($"newStatus must be one of: {string.Join(", ", TaskStatuses)}.");
+
+        var body = new { status = newStatus.ToLowerInvariant() };
+        var res = await _api.PatchAsync<UpdateTaskStatusResult>(
+            $"/api/v1/tasks/{Uri.EscapeDataString(taskId)}/status", body);
+        return res.Ok ? Json(res.Data) : ErrorJson(res);
+    }
+
+
+
     /// <summary>markAttendance → POST /api/v1/attendance (R2 self / R3 HR)</summary>
     public async Task<string> MarkAttendanceAsync(
         string employeeId, string? date, string status, string? checkIn, string? checkOut, string? note, bool confirmed)
@@ -196,6 +213,15 @@ public sealed class HrmsTools
         [property: JsonPropertyName("newAssigneeId")] string NewAssigneeId,
         [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt,
         [property: JsonPropertyName("notificationSent")] bool NotificationSent);
+
+
+    private sealed record UpdateTaskStatusResult(
+        [property: JsonPropertyName("taskId")] string TaskId,
+        [property: JsonPropertyName("title")] string Title,
+        [property: JsonPropertyName("previousStatus")] string PreviousStatus,
+        [property: JsonPropertyName("newStatus")] string NewStatus,
+        [property: JsonPropertyName("updatedAt")] DateTimeOffset UpdatedAt);
+
 
     private sealed record MarkAttendanceResult(
         [property: JsonPropertyName("attendanceId")] string AttendanceId,

@@ -77,6 +77,40 @@ public sealed class TasksController : ControllerBase
         });
     }
 
+   public sealed record UpdateTaskStatusRequest(string? Status);
+
+   [HttpPatch("{taskId}/status")]
+
+   public async Task<IActionResult> UpdateStatus(string taskId, [FromBody] UpdateTaskStatusRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req?.Status))
+            return BadRequest(new { error = "invalid_argument", message = "status is required." });
+
+        var existing = await _db.Tasks.FirstOrDefaultAsync(t => t.TaskId.ToLower() == taskId.ToLower());
+        if (existing is null)
+            return NotFound(new { error = "task_not_found", taskId });
+
+        await _db.Tasks.Where(t => t.TaskId == existing.TaskId)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, req.Status.ToLower()));
+
+        return Ok(new
+        {
+            taskId = existing.TaskId,
+            title = existing.Title,
+            newStatus = req.Status.ToLower(),
+            updatedAt = DateTimeOffset.Now,
+            notificationSent = true
+        });
+
+    }
+
+
+
+
+
+
+    
+
     public sealed record AssignTaskRequest(string? AssigneeId);
 
     // PATCH /api/v1/tasks/{taskId}/assignment  (assignTask, R3)
