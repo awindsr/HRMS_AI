@@ -49,7 +49,7 @@ public sealed class AttendanceController : ControllerBase
             CheckIn = req.CheckIn,
             CheckOut = req.CheckOut,
             Note = req.Note,
-            RecordedBy = req.EmployeeId!, // no auth in the mock; a real system uses the session user
+            RecordedBy = req.EmployeeId!,
             RecordedAt = DateTimeOffset.Now
         };
         _db.Attendance.Add(record);
@@ -67,7 +67,7 @@ public sealed class AttendanceController : ControllerBase
             recordedAt = record.RecordedAt,
             wasOverwrite
         });
-    }
+    } 
 
     // GET /api/v1/attendance/{employeeId}?from=&to=  (read-before-write; getAttendance is not yet a connected tool)
     [HttpGet("{employeeId}")]

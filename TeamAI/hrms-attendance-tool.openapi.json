@@ -1,0 +1,194 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Voyon Folks HRMS Attendance Tool",
+    "description": "Read-only tool that returns a team's attendance for a given date. Backed by the Voyon Folks HRMS. The backend owns the HRMS bearer token; it is never sent to or returned to the caller. This is the single OpenAPI tool registered with the Foundry agent.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://4n6qzp9c-5047.inc1.devtunnels.ms",
+      "description": "Public HTTPS port-forward host (dev tunnel). Use the plain '<id>-<port>' host, NOT the '-inspect' diagnostics host (that one requires AAD login and returns a 302). NOT localhost."
+    }
+  ],
+  "paths": {
+    "/api/v1/tools/team-attendance": {
+      "get": {
+        "operationId": "getTeamAttendance",
+        "summary": "Get a team's attendance for a date",
+        "description": "Returns a summary and per-member attendance (present, absent, leave, weekly_off) for the team on the requested date, including check-in/out times, worked hours, shift times, and leave type.",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "description": "The lookup date in YYYY-MM-DD format.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "example": "2020-12-17"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "query",
+            "required": false,
+            "description": "Team identifier. Omit to use the backend's default team.",
+            "schema": {
+              "type": "integer",
+              "example": 34110
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The team's attendance for the date.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamAttendance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The date is missing or malformed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The HRMS API rejected the credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The HRMS API is unreachable or returned a server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TeamAttendance": {
+        "type": "object",
+        "required": ["date", "teamId", "summary", "employees"],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2020-12-17"
+          },
+          "teamId": {
+            "type": "integer",
+            "example": 34110
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AttendanceSummary"
+          },
+          "employees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmployeeAttendance"
+            }
+          }
+        }
+      },
+      "AttendanceSummary": {
+        "type": "object",
+        "required": ["total", "present", "absent", "onLeave", "onWeeklyOff", "notReported"],
+        "properties": {
+          "total": { "type": "integer" },
+          "present": { "type": "integer" },
+          "absent": { "type": "integer" },
+          "onLeave": { "type": "integer" },
+          "onWeeklyOff": { "type": "integer" },
+          "notReported": { "type": "integer" }
+        }
+      },
+      "EmployeeAttendance": {
+        "type": "object",
+        "required": ["name", "employeeCode", "status", "shiftStart", "shiftEnd"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Vishnu C Varghese"
+          },
+          "employeeCode": {
+            "type": "string",
+            "example": "895"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["present", "absent", "leave", "weekly_off"]
+          },
+          "checkInTime": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:02"
+          },
+          "checkOutTime": {
+            "type": "string",
+            "nullable": true,
+            "example": "18:05"
+          },
+          "workedHours": {
+            "type": "string",
+            "nullable": true,
+            "example": "08:30"
+          },
+          "shiftStart": {
+            "type": "string",
+            "example": "09:00"
+          },
+          "shiftEnd": {
+            "type": "string",
+            "example": "18:00"
+          },
+          "leaveType": {
+            "type": "string",
+            "nullable": true,
+            "example": "Casual Leave"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "hrms_unauthorized"
+              },
+              "message": {
+                "type": "string",
+                "example": "The HRMS API rejected the request credentials."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
