@@ -81,8 +81,12 @@ public sealed class AgentService : IAgentService
         try
         {
             // CreateResponse runs the agent (with its server-side OpenAPI tool) and returns the
-            // final text. (Multi-turn chaining via PreviousResponseId is a follow-up enhancement.)
-            ResponseResult response = await Task.Run(() => _responses.CreateResponse(message), ct);
+            // final text. Passing the prior response id chains the turn so the agent keeps
+            // conversation context (needed for confirm → "yes" flows like attendance logging).
+            ResponseResult response = await Task.Run(() =>
+                string.IsNullOrWhiteSpace(threadId)
+                    ? _responses.CreateResponse(message)
+                    : _responses.CreateResponse(message, threadId), ct);
 
             var reply = response.GetOutputText() ?? string.Empty;
             var newThreadId = string.IsNullOrEmpty(response.Id) ? (threadId ?? "") : response.Id;
@@ -97,8 +101,13 @@ public sealed class AgentService : IAgentService
         catch (System.ClientModel.ClientResultException ex)
         {
             _logger.LogWarning(ex, "Foundry Responses call failed ({Status}).", ex.Status);
-            var code = ex.Status == 401 || ex.Status == 403 ? "upstream_unavailable" : "agent_run_failed";
-            return Failed(threadId ?? "", code, "The assistant service could not complete the request.", "failed");
+            var (code, errMessage) = ex.Status switch
+            {
+                401 or 403 => ("upstream_unavailable", "The assistant service could not complete the request."),
+                429 => ("rate_limited", "The assistant is busy right now (model rate limit). Please wait a few seconds and try again."),
+                _ => ("agent_run_failed", "The assistant service could not complete the request."),
+            };
+            return Failed(threadId ?? "", code, errMessage, "failed");
         }
         catch (Exception ex)
         {

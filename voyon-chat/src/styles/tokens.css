@@ -1,0 +1,85 @@
+/* ============================================================================
+   Voyon Folks — Design System Tokens
+   Derived from the Voyon Folks brand: vivid royal-blue primary, cool near-white
+   surfaces, gold rating accent, green stat accent, pill controls, soft shadows,
+   and the Instrument Sans typeface. Consume these via var(--token); never
+   hard-code brand values in component CSS.
+   ============================================================================ */
+
+:root {
+  /* ---- Brand (royal blue) ---- */
+  --brand-50:  #f2f6ff;
+  --brand-100: #e6efff;
+  --brand-200: #c9dcff;
+  --brand-300: #9cbcff;
+  --brand-400: #5d8dff;
+  --brand-500: #3b7bff;
+  --brand-600: #1f5bff;  /* primary */
+  --brand-700: #1747d6;  /* primary hover/pressed */
+  --brand-800: #143aa8;
+  --brand-900: #112e86;
+
+  /* ---- Accents ---- */
+  --accent-cyan: #21c7f0;  /* logo / orb gradient tail */
+  --gold:        #f6b40a;  /* rating stars */
+  --success:     #16a34a;  /* positive stats / present */
+  --danger:      #dc2626;  /* errors */
+  --danger-soft: #fdf3f2;
+  --danger-border: #f4d7d4;
+
+  /* ---- Ink (text) ---- */
+  --ink:        #0b1220;  /* headings */
+  --ink-soft:   #1c2636;  /* body-strong */
+  --muted:      #586273;  /* body */
+  --muted-2:    #8b94a4;  /* placeholder / captions */
+
+  /* ---- Surfaces ---- */
+  --surface:    #ffffff;
+  --surface-2:  #f6f9ff;  /* subtle raised / table header */
+  --bg:         #fbfcff;
+  --border:     #e7ecf5;
+  --border-strong: #d6deec;
+
+  /* ---- Brand gradients ---- */
+  --grad-orb: radial-gradient(circle at 35% 30%, #bfe0ff 0%, var(--brand-500) 42%, var(--brand-700) 88%);
+  --grad-bg:
+    radial-gradient(60% 48% at 86% 0%, rgba(59, 123, 255, 0.12), transparent 70%),
+    radial-gradient(52% 42% at 8% 100%, rgba(33, 199, 240, 0.12), transparent 72%),
+    linear-gradient(180deg, #fbfcff 0%, #f3f7ff 100%);
+
+  /* ---- Typography ---- */
+  --font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  --text-xs:   0.8125rem;  /* 13 */
+  --text-sm:   0.9375rem;  /* 15 */
+  --text-base: 1rem;       /* 16 */
+  --text-lg:   1.125rem;   /* 18 */
+  --text-xl:   1.375rem;   /* 22 */
+  --text-2xl:  1.75rem;    /* 28 */
+  --text-3xl:  2.5rem;     /* 40 */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.2;
+  --leading-normal: 1.55;
+
+  /* ---- Radius ---- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* ---- Shadows (cool-tinted, soft) ---- */
+  --shadow-sm: 0 1px 2px rgba(16, 31, 68, 0.06);
+  --shadow-md: 0 8px 24px rgba(16, 31, 68, 0.08);
+  --shadow-lg: 0 18px 48px rgba(16, 31, 68, 0.12);
+  --shadow-brand: 0 8px 22px rgba(31, 91, 255, 0.30);
+
+  /* ---- Motion ---- */
+  --dur-fast: 0.12s;
+  --dur: 0.18s;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}

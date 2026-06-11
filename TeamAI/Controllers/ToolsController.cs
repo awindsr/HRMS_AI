@@ -51,6 +51,42 @@ public sealed class ToolsController : ControllerBase
         }
     }
 
+    public sealed record LogAttendanceRequest(
+        string? EmployeeCode, string? Type, int? TeamId, string? Location, string? Comment);
+
+    /// <summary>
+    /// POST /api/v1/tools/log-attendance — records a LIVE check-in/check-out for a team member
+    /// at the current time. HRMS timestamps the punch on submission; there is no date/time input.
+    /// </summary>
+    [HttpPost("log-attendance")]
+    public async Task<IActionResult> LogAttendance([FromBody] LogAttendanceRequest? body, CancellationToken ct)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.EmployeeCode))
+            return ToolError("invalid_argument", "'employeeCode' is required.");
+
+        var type = (body.Type ?? "").Trim().ToLowerInvariant();
+        if (type != "check_in" && type != "check_out")
+            return ToolError("invalid_type", "'type' must be 'check_in' or 'check_out'.");
+
+        try
+        {
+            var input = new TeamAI.Models.Tools.LogAttendanceInput(
+                body.EmployeeCode!, type, body.TeamId, body.Location, body.Comment);
+            var result = await _attendance.LogAttendanceAsync(input, ct);
+            return Ok(result);
+        }
+        catch (HrmsUnauthorizedException ex)
+        {
+            _logger.LogWarning("HRMS unauthorized (log): {Message}", ex.Message);
+            return ToolError("hrms_unauthorized", "The HR system rejected the request credentials.");
+        }
+        catch (HrmsUnavailableException ex)
+        {
+            _logger.LogWarning(ex, "HRMS unavailable (log): {Message}", ex.Message);
+            return ToolError("hrms_unavailable", "The HR system is currently unavailable. Please try again shortly.");
+        }
+    }
+
     /// <summary>Strict YYYY-MM-DD parse; rejects nulls, times, and locale-dependent forms.</summary>
     private static bool TryParseDate(string? value, out DateOnly date)
     {

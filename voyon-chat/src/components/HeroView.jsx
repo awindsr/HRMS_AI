@@ -1,4 +1,4 @@
-import Orb from './Orb'
+import GlowOrb from './GlowOrb'
 import Composer from './Composer'
 import SuggestionChips from './SuggestionChips'
 import { greeting } from '../utils/greeting'
@@ -11,9 +11,11 @@ export default function HeroView({ onSend, onNewChat, disabled }) {
 
   return (
     <main className="hero">
-      <Orb />
+      <div className="hero__orb">
+        <GlowOrb hue={0} hoverIntensity={0.4} backgroundColor="#fbfcff" />
+      </div>
       <h1 className="hero__title">{title}</h1>
-      <p className="hero__subtitle">Ask about your team's attendance.</p>
+      <p className="hero__subtitle">Check your team's attendance, or log a live check-in/out.</p>
       <Composer onSend={onSend} onNewChat={onNewChat} disabled={disabled} />
       <SuggestionChips onPick={onSend} disabled={disabled} />
     </main>

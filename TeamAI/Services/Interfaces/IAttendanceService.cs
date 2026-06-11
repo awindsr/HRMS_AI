@@ -11,4 +11,11 @@ public interface IAttendanceService
 {
     Task<TeamAttendance> GetTeamAttendanceAsync(
         DateOnly date, int? teamId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Logs a check-in/check-out for a team member (resolved from their employee code) by
+    /// posting to HRMS. Throws <see cref="HrmsUnauthorizedException"/> / <see cref="HrmsUnavailableException"/>
+    /// for upstream failures; business outcomes (e.g. member not found, rejected) come back in the result.
+    /// </summary>
+    Task<LogAttendanceResult> LogAttendanceAsync(LogAttendanceInput input, CancellationToken ct = default);
 }

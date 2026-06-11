@@ -23,6 +23,16 @@ public static class JwtReader
             EmployeeId: GetString(payload.Value, "EmployeeId"));
     }
 
+    /// <summary>Reads the integer CompanyId claim from the token, or null if absent/unreadable.</summary>
+    public static int? ReadCompanyId(string? token)
+    {
+        var payload = DecodePayload(token);
+        if (payload is null) return null;
+
+        var raw = GetString(payload.Value, "CompanyId");
+        return int.TryParse(raw, out var id) ? id : null;
+    }
+
     private static JsonElement? DecodePayload(string? token)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;

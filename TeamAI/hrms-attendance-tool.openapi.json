@@ -83,6 +83,35 @@
           }
         }
       }
+    },
+    "/api/v1/tools/log-attendance": {
+      "post": {
+        "operationId": "logAttendance",
+        "summary": "Record a live check-in or check-out (now)",
+        "description": "Records a LIVE check-in or check-out for one team member (identified by their employeeCode) AT THE CURRENT TIME. This is a live punch — HRMS timestamps it on submission, so there is no date or time parameter and the punch cannot be set or backdated. ALWAYS confirm with the user before calling. The response reports success, or an { error } the assistant should explain.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogAttendanceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result of the log attempt (success, or an error in the body).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAttendanceResult"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -154,6 +183,11 @@
             "nullable": true,
             "example": "08:30"
           },
+          "breakHours": {
+            "type": "string",
+            "nullable": true,
+            "example": "01:00"
+          },
           "shiftStart": {
             "type": "string",
             "example": "09:00"
@@ -166,6 +200,30 @@
             "type": "string",
             "nullable": true,
             "example": "Casual Leave"
+          },
+          "leaveReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Only when on leave.",
+            "example": "Family function"
+          },
+          "leaveStartDate": {
+            "type": "string",
+            "nullable": true,
+            "description": "Only when on leave.",
+            "example": "2024-04-22"
+          },
+          "leaveToDate": {
+            "type": "string",
+            "nullable": true,
+            "description": "Only when on leave.",
+            "example": "2024-04-24"
+          },
+          "leaveHours": {
+            "type": "string",
+            "nullable": true,
+            "description": "Only when on leave.",
+            "example": "08:00"
           }
         }
       },
@@ -187,6 +245,46 @@
               }
             }
           }
+        }
+      },
+      "LogAttendanceRequest": {
+        "type": "object",
+        "required": ["employeeCode", "type"],
+        "description": "A live punch. There is no date or time field — the punch is recorded at the current time.",
+        "properties": {
+          "employeeCode": {
+            "type": "string",
+            "description": "The member's employee code, as returned by getTeamAttendance.",
+            "example": "1957"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["check_in", "check_out"]
+          },
+          "teamId": {
+            "type": "integer",
+            "description": "Optional team id; omit to use the default team.",
+            "example": 34110
+          },
+          "location": {
+            "type": "string",
+            "nullable": true
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "LogAttendanceResult": {
+        "type": "object",
+        "required": ["success", "employeeCode", "employeeName", "type", "message"],
+        "properties": {
+          "success": { "type": "boolean" },
+          "employeeCode": { "type": "string", "example": "1957" },
+          "employeeName": { "type": "string", "example": "Manju V" },
+          "type": { "type": "string", "enum": ["check_in", "check_out"] },
+          "message": { "type": "string", "example": "Recorded check-in for Manju V." }
         }
       }
     }

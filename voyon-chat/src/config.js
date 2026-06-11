@@ -8,6 +8,6 @@ export const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 export const SUGGESTIONS = [
   "Who's absent today?",
   "Show today's attendance report",
-  'Who checked in late today?',
   "Who's on leave today?",
+  'Log a check-in',
 ]
