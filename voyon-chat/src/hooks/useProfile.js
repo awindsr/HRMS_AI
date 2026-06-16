@@ -1,25 +1,13 @@
-import { useEffect, useState } from 'react'
-import { fetchProfile } from '../api/profile'
+import { useAuth } from '../auth/AuthContext'
 
 /**
- * Loads the manager's identity once on mount. Returns the full name and a friendly first name
- * for the greeting. Fails silently — the UI just falls back to a name-less greeting.
+ * Exposes the signed-in user's identity for the greeting. The profile is loaded once at sign-in
+ * and shared via AuthContext, so this is just a thin selector — no extra fetch.
  */
 export function useProfile() {
-  const [profile, setProfile] = useState(null)
-
-  useEffect(() => {
-    let alive = true
-    fetchProfile()
-      .then((p) => alive && setProfile(p))
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  const name = profile?.name?.trim() || null
+  const { user } = useAuth()
+  const name = user?.name?.trim() || null
   const firstName = name ? name.split(/\s+/)[0] : null
 
-  return { name, firstName, email: profile?.email ?? null, employeeId: profile?.employeeId ?? null }
+  return { name, firstName, email: user?.email ?? null, employeeId: user?.employeeId ?? null }
 }

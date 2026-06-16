@@ -10,7 +10,7 @@ export default function GlowOrb({
   hoverIntensity = 0.4,
   rotateOnHover = true,
   forceHoverState = false,
-  backgroundColor = '#fbfcff',
+  backgroundColor = 'transparent',
 }) {
   const ctnDom = useRef(null)
 

@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local env files — never commit. Commit .env.example (no real values) instead.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

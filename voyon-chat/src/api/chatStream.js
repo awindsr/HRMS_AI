@@ -11,7 +11,10 @@ export function openChatStream({ message, threadId, onThread, onDelta, onTool, o
   const params = new URLSearchParams({ message })
   if (threadId) params.set('threadId', threadId)
 
-  const source = new EventSource(`${API_BASE}/api/v1/chat/stream?${params.toString()}`)
+  // withCredentials sends the session cookie (needed cross-origin; harmless same-origin).
+  const source = new EventSource(`${API_BASE}/api/v1/chat/stream?${params.toString()}`, {
+    withCredentials: true,
+  })
   let closed = false
 
   const close = () => {
