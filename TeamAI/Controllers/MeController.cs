@@ -1,17 +1,18 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using TeamAI.Models.Api;
 using TeamAI.Services;
 using TeamAI.Services.Interfaces;
 
 namespace TeamAI.Controllers;
 
 /// <summary>
-/// Returns the signed-in manager's display identity, decoded from the server-held HRMS token.
-/// Used by the UI greeting. The token never leaves the backend; only name/email/employeeId are
-/// returned. There is no login, so "me" is whoever the configured token represents.
+/// Returns the signed-in user's display identity, decoded from their session's HRMS token.
+/// Requires an authenticated session — the UI uses a 401 here to know it must show the login
+/// screen. The token never leaves the backend; only name/email/employeeId are returned.
 /// </summary>
 [ApiController]
 [Route("api/v1/me")]
+[Authorize]
 public sealed class MeController : ControllerBase
 {
     private readonly ITokenManager _tokens;
@@ -21,15 +22,7 @@ public sealed class MeController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
     {
-        try
-        {
-            var token = await _tokens.GetTokenAsync(ct);
-            return Ok(JwtReader.ReadProfile(token));
-        }
-        catch (InvalidOperationException)
-        {
-            // Token not configured — return an empty profile so the UI falls back gracefully.
-            return Ok(new UserProfile(null, null, null));
-        }
+        var token = await _tokens.GetTokenAsync(ct);
+        return Ok(JwtReader.ReadProfile(token));
     }
 }

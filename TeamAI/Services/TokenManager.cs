@@ -1,26 +1,35 @@
-using Microsoft.Extensions.Options;
-using TeamAI.Configuration;
+using Microsoft.AspNetCore.Authentication;
 using TeamAI.Services.Interfaces;
 
 namespace TeamAI.Services;
 
 /// <summary>
-/// MVP token manager: returns the manually-configured <see cref="HrmsOptions.Token"/>.
-/// Registered Scoped so the Phase 2 swap to a per-user JWT is a single-method change.
-/// Never logs the token.
+/// Resolves the HRMS bearer token for an outgoing call: the signed-in user's HRMS JWT, read from
+/// the encrypted auth cookie — so HRMS authorization applies per signed-in user. Every HRMS call
+/// now originates from an authenticated request (the chat relay runs the agent's tools in-process,
+/// and /me is browser-authenticated), so there is no service-token fallback. Registered Scoped;
+/// never logs the token.
 /// </summary>
 public sealed class TokenManager : ITokenManager
 {
-    private readonly HrmsOptions _options;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public TokenManager(IOptions<HrmsOptions> options) => _options = options.Value;
-
-    public Task<string> GetTokenAsync(CancellationToken ct = default)
+    public TokenManager(IHttpContextAccessor httpContextAccessor)
     {
-        if (string.IsNullOrWhiteSpace(_options.Token))
-            throw new InvalidOperationException(
-                "HRMS token is not configured. Set Hrms:Token via user-secrets (dev) or Key Vault (prod).");
+        _httpContextAccessor = httpContextAccessor;
+    }
 
-        return Task.FromResult(_options.Token);
+    public async Task<string> GetTokenAsync(CancellationToken ct = default)
+    {
+        var http = _httpContextAccessor.HttpContext;
+        if (http?.User?.Identity?.IsAuthenticated == true)
+        {
+            var userToken = await http.GetTokenAsync(AuthConstants.HrmsTokenName);
+            if (!string.IsNullOrWhiteSpace(userToken))
+                return userToken;
+        }
+
+        throw new InvalidOperationException(
+            "No HRMS token available: the request is not signed in. HRMS calls require an authenticated user session.");
     }
 }

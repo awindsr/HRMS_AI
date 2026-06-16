@@ -2,3 +2,9 @@ bin/
 obj/
 *.user
 run*.log
+
+# Secrets / local-only config — never commit. Real values live in .NET User Secrets
+# or environment variables (see .env.example). Committed config holds placeholders only.
+appsettings.Development.json
+appsettings.*.Local.json
+.env

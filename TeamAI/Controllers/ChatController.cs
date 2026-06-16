@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TeamAI.Models.Api;
 using TeamAI.Services.Interfaces;
@@ -8,20 +9,24 @@ namespace TeamAI.Controllers;
 /// <summary>
 /// Phase 2 chat relay. Fronts the existing Foundry agent for the custom React UI, alongside
 /// the still-working playground. The browser holds no credentials; the HRMS token stays in the
-/// backend tool endpoints. Two surfaces: a non-streaming POST and an SSE stream.
+/// backend tool endpoints. Requires an authenticated session. Two surfaces: a non-streaming
+/// POST and an SSE stream.
 /// </summary>
 [ApiController]
 [Route("api/v1/chat")]
+[Authorize]
 public sealed class ChatController : ControllerBase
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly IAgentService _agent;
+    private readonly IAgentToolDispatcher _tools;
     private readonly ILogger<ChatController> _logger;
 
-    public ChatController(IAgentService agent, ILogger<ChatController> logger)
+    public ChatController(IAgentService agent, IAgentToolDispatcher tools, ILogger<ChatController> logger)
     {
         _agent = agent;
+        _tools = tools;
         _logger = logger;
     }
 
@@ -32,7 +37,7 @@ public sealed class ChatController : ControllerBase
         if (request is null || string.IsNullOrWhiteSpace(request.Message))
             return BadRequest(new { error = new ApiError("bad_request", "A non-empty 'message' is required.") });
 
-        var result = await _agent.SendMessageAsync(request.ThreadId, request.Message, ct);
+        var result = await _agent.SendMessageAsync(request.ThreadId, request.Message, _tools.InvokeAsync, ct);
 
         if (result.Error is not null)
         {
@@ -67,7 +72,7 @@ public sealed class ChatController : ControllerBase
 
         try
         {
-            await foreach (var ev in _agent.StreamMessageAsync(threadId, message, ct))
+            await foreach (var ev in _agent.StreamMessageAsync(threadId, message, _tools.InvokeAsync, ct))
                 await WriteEventAsync(ev.Type, ev.Data, ct);
         }
         catch (OperationCanceledException)

@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
+    <!-- Dev box has the .NET 8 + 10 runtimes but not 9.0; roll forward to a higher major so
+         the net9.0 build runs on the installed .NET 10 runtime. -->
+    <RollForward>Major</RollForward>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>teamai-hrms-attendance</UserSecretsId>
