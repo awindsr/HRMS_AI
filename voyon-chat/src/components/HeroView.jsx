@@ -15,7 +15,7 @@ export default function HeroView({ onSend, onNewChat, disabled }) {
         <GlowOrb hue={0} hoverIntensity={0.4} backgroundColor="#fbfcff" />
       </div>
       <h1 className="hero__title">{title}</h1>
-      <p className="hero__subtitle">Check your team's attendance, or log a live check-in/out.</p>
+      <p className="hero__subtitle">Check your attendance, or log a live check-in/out.</p>
       <Composer onSend={onSend} onNewChat={onNewChat} disabled={disabled} />
       <SuggestionChips onPick={onSend} disabled={disabled} />
     </main>

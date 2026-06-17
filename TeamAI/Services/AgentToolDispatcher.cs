@@ -8,13 +8,13 @@ namespace TeamAI.Services;
 /// <summary>
 /// Maps the agent's function-tool calls onto <see cref="IAttendanceService"/>. Registered Scoped
 /// so it shares the request's user token. The function names and argument shapes here must match
-/// the function tools configured on the Foundry agent (formerly the hrms_api_tool OpenAPI spec).
+/// the function tools configured on the Foundry agent. This is an INDIVIDUAL-user assistant: every
+/// tool acts on the signed-in user only — no employee/team identifier is ever accepted from the agent.
 /// </summary>
 public sealed class AgentToolDispatcher : IAgentToolDispatcher
 {
-    // Tool names. These match the old OpenAPI operationIds so the agent's existing instructions
-    // keep working unchanged; the tools are now declared inline by AgentService (see HrmsTools).
-    public const string GetTeamAttendance = "getTeamAttendance";
+    public const string GetMyAttendance = "getMyAttendance";
+    public const string GetMyMonthlyAttendance = "getMyMonthlyAttendance";
     public const string LogAttendance = "logAttendance";
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -34,7 +34,8 @@ public sealed class AgentToolDispatcher : IAgentToolDispatcher
         {
             return name switch
             {
-                GetTeamAttendance => await RunGetTeamAttendanceAsync(argumentsJson, ct),
+                GetMyAttendance => await RunGetMyAttendanceAsync(argumentsJson, ct),
+                GetMyMonthlyAttendance => await RunGetMyMonthlyAttendanceAsync(argumentsJson, ct),
                 LogAttendance => await RunLogAttendanceAsync(argumentsJson, ct),
                 _ => Error("unknown_tool", $"No tool named '{name}'."),
             };
@@ -55,7 +56,7 @@ public sealed class AgentToolDispatcher : IAgentToolDispatcher
         }
     }
 
-    private async Task<string> RunGetTeamAttendanceAsync(string argsJson, CancellationToken ct)
+    private async Task<string> RunGetMyAttendanceAsync(string argsJson, CancellationToken ct)
     {
         using var doc = Parse(argsJson);
         var root = doc.RootElement;
@@ -63,7 +64,23 @@ public sealed class AgentToolDispatcher : IAgentToolDispatcher
         if (!TryParseDate(GetString(root, "date"), out var date))
             return Error("invalid_date", "The 'date' argument is required and must be in YYYY-MM-DD format.");
 
-        var result = await _attendance.GetTeamAttendanceAsync(date, GetInt(root, "team_id"), ct);
+        var result = await _attendance.GetMyAttendanceAsync(date, ct);
+        return JsonSerializer.Serialize(result, Json);
+    }
+
+    private async Task<string> RunGetMyMonthlyAttendanceAsync(string argsJson, CancellationToken ct)
+    {
+        using var doc = Parse(argsJson);
+        var root = doc.RootElement;
+
+        var month = GetInt(root, "month");
+        var year = GetInt(root, "year");
+        if (month is null or < 1 or > 12)
+            return Error("invalid_argument", "'month' is required and must be 1-12.");
+        if (year is null or < 2000 or > 2100)
+            return Error("invalid_argument", "'year' is required and must be a four-digit year.");
+
+        var result = await _attendance.GetMyMonthlyAttendanceAsync(month.Value, year.Value, ct);
         return JsonSerializer.Serialize(result, Json);
     }
 
@@ -72,16 +89,11 @@ public sealed class AgentToolDispatcher : IAgentToolDispatcher
         using var doc = Parse(argsJson);
         var root = doc.RootElement;
 
-        var employeeCode = GetString(root, "employee_code");
-        if (string.IsNullOrWhiteSpace(employeeCode))
-            return Error("invalid_argument", "'employee_code' is required.");
-
         var type = (GetString(root, "type") ?? "").Trim().ToLowerInvariant();
         if (type != "check_in" && type != "check_out")
             return Error("invalid_type", "'type' must be 'check_in' or 'check_out'.");
 
-        var input = new LogAttendanceInput(
-            employeeCode!, type, GetInt(root, "team_id"), GetString(root, "location"), GetString(root, "comment"));
+        var input = new LogAttendanceInput(type, GetString(root, "location"), GetString(root, "comment"));
         var result = await _attendance.LogAttendanceAsync(input, ct);
         return JsonSerializer.Serialize(result, Json);
     }
@@ -93,7 +105,7 @@ public sealed class AgentToolDispatcher : IAgentToolDispatcher
     private static string? GetString(JsonElement root, string name) =>
         root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-    // Accept the id as a JSON number or a numeric string (models sometimes quote it).
+    // Accept the value as a JSON number or a numeric string (models sometimes quote it).
     private static int? GetInt(JsonElement root, string name)
     {
         if (!root.TryGetProperty(name, out var v)) return null;

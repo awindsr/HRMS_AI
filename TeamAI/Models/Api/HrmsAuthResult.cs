@@ -13,10 +13,16 @@ public sealed record HrmsAuthResult(
     int ExpiresIn,
     int StatusCode,
     string? Error,
-    string? ErrorDescription)
+    string? ErrorDescription,
+    // Display fields returned directly by m/api/Login/LoginUser (LoginReturnModel), so the cookie
+    // principal does not depend on the token's claim spelling. Null on failure.
+    string? DisplayName = null,
+    int? EmployeeId = null,
+    string? PhotoUrl = null)
 {
-    public static HrmsAuthResult Ok(string accessToken, int expiresIn) =>
-        new(true, accessToken, expiresIn, 200, null, null);
+    public static HrmsAuthResult Ok(
+        string accessToken, int expiresIn, string? displayName, int? employeeId, string? photoUrl) =>
+        new(true, accessToken, expiresIn, 200, null, null, displayName, employeeId, photoUrl);
 
     public static HrmsAuthResult Fail(int statusCode, string error, string description) =>
         new(false, null, 0, statusCode, error, description);

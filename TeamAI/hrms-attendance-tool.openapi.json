@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Voyon Folks HRMS Attendance Tool",
-    "description": "Read-only tool that returns a team's attendance for a given date. Backed by the Voyon Folks HRMS. The backend owns the HRMS bearer token; it is never sent to or returned to the caller. This is the single OpenAPI tool registered with the Foundry agent.",
-    "version": "1.0.0"
+    "title": "Voyon Folks HRMS Attendance Tool (Individual)",
+    "description": "Self-service attendance tools for the SIGNED-IN user. Reads the user's own attendance for a date or a month, and records the user's own live check-in/out. There is no employee or team identifier — the backend always acts on the signed-in user, resolved from their token. The backend owns the HRMS bearer token; it is never sent to or returned to the caller. This document describes the tool contract; the tools are declared inline on the Foundry agent and executed in the backend.",
+    "version": "2.0.0"
   },
   "servers": [
     {
@@ -12,74 +12,77 @@
     }
   ],
   "paths": {
-    "/api/v1/tools/team-attendance": {
+    "/api/v1/tools/my-attendance": {
       "get": {
-        "operationId": "getTeamAttendance",
-        "summary": "Get a team's attendance for a date",
-        "description": "Returns a summary and per-member attendance (present, absent, leave, weekly_off) for the team on the requested date, including check-in/out times, worked hours, shift times, and leave type.",
+        "operationId": "getMyAttendance",
+        "summary": "Get the signed-in user's attendance for a date",
+        "description": "Returns the signed-in user's own attendance for the requested date: status (present, absent, leave, weekly_off, holiday), the day's check-in/out punches, worked/break hours, shift times, and leave type. Read-only. No employee or team argument — always the signed-in user.",
         "parameters": [
           {
             "name": "date",
             "in": "query",
             "required": true,
             "description": "The lookup date in YYYY-MM-DD format.",
-            "schema": {
-              "type": "string",
-              "format": "date",
-              "example": "2020-12-17"
-            }
-          },
-          {
-            "name": "team_id",
-            "in": "query",
-            "required": false,
-            "description": "Team identifier. Omit to use the backend's default team.",
-            "schema": {
-              "type": "integer",
-              "example": 34110
-            }
+            "schema": { "type": "string", "format": "date", "example": "2026-06-17" }
           }
         ],
         "responses": {
           "200": {
-            "description": "The team's attendance for the date.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamAttendance"
-                }
-              }
-            }
+            "description": "The user's attendance for the date.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MyAttendance" } } }
           },
           "400": {
             "description": "The date is missing or malformed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
           "401": {
             "description": "The HRMS API rejected the credentials.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
           "502": {
             "description": "The HRMS API is unreachable or returned a server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/tools/my-monthly-attendance": {
+      "get": {
+        "operationId": "getMyMonthlyAttendance",
+        "summary": "Get the signed-in user's attendance for a month",
+        "description": "Returns the signed-in user's own attendance summary for a whole month: roll-up day counts (present, absent, leave, holiday, weekly off, offered) plus a per-day list with status, first check-in, last check-out, and worked hours. Read-only; for the signed-in user only.",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "description": "Calendar month, 1-12.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 12, "example": 6 }
+          },
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "description": "Four-digit year.",
+            "schema": { "type": "integer", "example": 2026 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The user's monthly attendance summary.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MyMonthlyAttendance" } } }
+          },
+          "400": {
+            "description": "The month or year is missing or invalid.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": {
+            "description": "The HRMS API rejected the credentials.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "502": {
+            "description": "The HRMS API is unreachable or returned a server error.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
       }
@@ -87,28 +90,16 @@
     "/api/v1/tools/log-attendance": {
       "post": {
         "operationId": "logAttendance",
-        "summary": "Record a live check-in or check-out (now)",
-        "description": "Records a LIVE check-in or check-out for one team member (identified by their employeeCode) AT THE CURRENT TIME. This is a live punch — HRMS timestamps it on submission, so there is no date or time parameter and the punch cannot be set or backdated. ALWAYS confirm with the user before calling. The response reports success, or an { error } the assistant should explain.",
+        "summary": "Record the signed-in user's live check-in or check-out (now)",
+        "description": "Records a LIVE check-in or check-out for the SIGNED-IN user AT THE CURRENT TIME. This is a live punch — HRMS timestamps it on submission, so there is no date or time parameter and it cannot be backdated. There is no employee argument — it is always for the signed-in user. ALWAYS confirm with the user before calling. The response reports success, or an { error } the assistant should explain.",
         "requestBody": {
           "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LogAttendanceRequest"
-              }
-            }
-          }
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LogAttendanceRequest" } } }
         },
         "responses": {
           "200": {
             "description": "The result of the log attempt (success, or an error in the body).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LogAttendanceResult"
-                }
-              }
-            }
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LogAttendanceResult" } } }
           }
         }
       }
@@ -116,115 +107,71 @@
   },
   "components": {
     "schemas": {
-      "TeamAttendance": {
+      "MyAttendance": {
         "type": "object",
-        "required": ["date", "teamId", "summary", "employees"],
+        "required": ["date", "status", "punches"],
         "properties": {
-          "date": {
-            "type": "string",
-            "format": "date",
-            "example": "2020-12-17"
-          },
-          "teamId": {
-            "type": "integer",
-            "example": 34110
-          },
-          "summary": {
-            "$ref": "#/components/schemas/AttendanceSummary"
-          },
-          "employees": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EmployeeAttendance"
-            }
-          }
-        }
-      },
-      "AttendanceSummary": {
-        "type": "object",
-        "required": ["total", "present", "absent", "onLeave", "onWeeklyOff", "notReported"],
-        "properties": {
-          "total": { "type": "integer" },
-          "present": { "type": "integer" },
-          "absent": { "type": "integer" },
-          "onLeave": { "type": "integer" },
-          "onWeeklyOff": { "type": "integer" },
-          "notReported": { "type": "integer" }
-        }
-      },
-      "EmployeeAttendance": {
-        "type": "object",
-        "required": ["name", "employeeCode", "status", "shiftStart", "shiftEnd"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "example": "Vishnu C Varghese"
-          },
-          "employeeCode": {
-            "type": "string",
-            "example": "895"
-          },
+          "date": { "type": "string", "format": "date", "example": "2026-06-17" },
           "status": {
             "type": "string",
-            "enum": ["present", "absent", "leave", "weekly_off"]
+            "enum": ["present", "absent", "leave", "weekly_off", "holiday", "not_reported"]
           },
-          "checkInTime": {
-            "type": "string",
-            "nullable": true,
-            "example": "09:02"
-          },
-          "checkOutTime": {
-            "type": "string",
-            "nullable": true,
-            "example": "18:05"
-          },
-          "workedHours": {
-            "type": "string",
-            "nullable": true,
-            "example": "08:30"
-          },
-          "breakHours": {
-            "type": "string",
-            "nullable": true,
-            "example": "01:00"
-          },
-          "shiftStart": {
-            "type": "string",
-            "example": "09:00"
-          },
-          "shiftEnd": {
-            "type": "string",
-            "example": "18:00"
-          },
-          "leaveType": {
-            "type": "string",
-            "nullable": true,
-            "example": "Casual Leave"
-          },
-          "leaveReason": {
-            "type": "string",
-            "nullable": true,
-            "description": "Only when on leave.",
-            "example": "Family function"
-          },
-          "leaveStartDate": {
-            "type": "string",
-            "nullable": true,
-            "description": "Only when on leave.",
-            "example": "2024-04-22"
-          },
-          "leaveToDate": {
-            "type": "string",
-            "nullable": true,
-            "description": "Only when on leave.",
-            "example": "2024-04-24"
-          },
-          "leaveHours": {
-            "type": "string",
-            "nullable": true,
-            "description": "Only when on leave.",
-            "example": "08:00"
+          "dayType": { "type": "string", "nullable": true, "example": "Working Day" },
+          "shiftStart": { "type": "string", "nullable": true, "example": "09:00" },
+          "shiftEnd": { "type": "string", "nullable": true, "example": "18:00" },
+          "workedHours": { "type": "string", "nullable": true, "example": "08:30" },
+          "breakHours": { "type": "string", "nullable": true, "example": "01:00" },
+          "leaveHours": { "type": "string", "nullable": true, "description": "Only when on leave.", "example": "08:00" },
+          "leaveType": { "type": "string", "nullable": true, "description": "Only when on leave.", "example": "Casual Leave" },
+          "punches": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AttendancePunch" }
           }
+        }
+      },
+      "AttendancePunch": {
+        "type": "object",
+        "properties": {
+          "checkIn": { "type": "string", "nullable": true, "example": "09:02" },
+          "checkOut": { "type": "string", "nullable": true, "example": "18:05" },
+          "checkInLocation": { "type": "string", "nullable": true },
+          "checkOutLocation": { "type": "string", "nullable": true }
+        }
+      },
+      "MyMonthlyAttendance": {
+        "type": "object",
+        "required": ["month", "year", "summary", "days"],
+        "properties": {
+          "month": { "type": "integer", "example": 6 },
+          "year": { "type": "integer", "example": 2026 },
+          "summary": { "$ref": "#/components/schemas/MonthlySummary" },
+          "days": { "type": "array", "items": { "$ref": "#/components/schemas/MyMonthlyDay" } }
+        }
+      },
+      "MonthlySummary": {
+        "type": "object",
+        "required": ["offered", "present", "absent", "leave", "holiday", "weeklyOff"],
+        "properties": {
+          "offered": { "type": "number", "example": 22 },
+          "present": { "type": "number", "example": 20 },
+          "absent": { "type": "number", "example": 1 },
+          "leave": { "type": "number", "example": 1 },
+          "holiday": { "type": "number", "example": 2 },
+          "weeklyOff": { "type": "number", "example": 8 }
+        }
+      },
+      "MyMonthlyDay": {
+        "type": "object",
+        "required": ["date", "status"],
+        "properties": {
+          "date": { "type": "string", "format": "date", "example": "2026-06-17" },
+          "status": {
+            "type": "string",
+            "enum": ["present", "absent", "leave", "weekly_off", "holiday", "not_reported"]
+          },
+          "firstCheckIn": { "type": "string", "nullable": true, "example": "09:02" },
+          "lastCheckOut": { "type": "string", "nullable": true, "example": "18:05" },
+          "workedHours": { "type": "string", "nullable": true, "example": "08:30" }
         }
       },
       "Error": {
@@ -235,56 +182,29 @@
             "type": "object",
             "required": ["code", "message"],
             "properties": {
-              "code": {
-                "type": "string",
-                "example": "hrms_unauthorized"
-              },
-              "message": {
-                "type": "string",
-                "example": "The HRMS API rejected the request credentials."
-              }
+              "code": { "type": "string", "example": "hrms_unauthorized" },
+              "message": { "type": "string", "example": "The HRMS API rejected the request credentials." }
             }
           }
         }
       },
       "LogAttendanceRequest": {
         "type": "object",
-        "required": ["employeeCode", "type"],
-        "description": "A live punch. There is no date or time field — the punch is recorded at the current time.",
+        "required": ["type"],
+        "description": "A live punch for the signed-in user. There is no employee, date, or time field — the punch is recorded at the current time.",
         "properties": {
-          "employeeCode": {
-            "type": "string",
-            "description": "The member's employee code, as returned by getTeamAttendance.",
-            "example": "1957"
-          },
-          "type": {
-            "type": "string",
-            "enum": ["check_in", "check_out"]
-          },
-          "teamId": {
-            "type": "integer",
-            "description": "Optional team id; omit to use the default team.",
-            "example": 34110
-          },
-          "location": {
-            "type": "string",
-            "nullable": true
-          },
-          "comment": {
-            "type": "string",
-            "nullable": true
-          }
+          "type": { "type": "string", "enum": ["check_in", "check_out"] },
+          "location": { "type": "string", "nullable": true },
+          "comment": { "type": "string", "nullable": true }
         }
       },
       "LogAttendanceResult": {
         "type": "object",
-        "required": ["success", "employeeCode", "employeeName", "type", "message"],
+        "required": ["success", "type", "message"],
         "properties": {
           "success": { "type": "boolean" },
-          "employeeCode": { "type": "string", "example": "1957" },
-          "employeeName": { "type": "string", "example": "Manju V" },
           "type": { "type": "string", "enum": ["check_in", "check_out"] },
-          "message": { "type": "string", "example": "Recorded check-in for Manju V." }
+          "message": { "type": "string", "example": "Recorded your check-in." }
         }
       }
     }

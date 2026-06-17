@@ -1,9 +1,9 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using System.Text.Json;
-using Azure.AI.Extensions.OpenAI;
-using Azure.AI.Projects;
-using Azure.AI.Projects.Agents;
 using Azure.Identity;
 using Microsoft.Extensions.Options;
+using OpenAI;
 using OpenAI.Responses;
 using TeamAI.Configuration;
 using TeamAI.Models.Api;
@@ -12,15 +12,16 @@ using TeamAI.Services.Interfaces;
 namespace TeamAI.Services;
 
 /// <summary>
-/// Chat relay over the EXISTING new-style Foundry agent (Responses protocol). It calls the agent
-/// via Azure.AI.Projects; the agent runs its portal-configured instructions + function tools
-/// server-side. When the agent requests a function tool, the relay runs it in-process (under the
-/// signed-in user's token) and submits the output back, looping until the agent returns its final
+/// Chat relay over a Foundry-deployed MODEL (Responses protocol), driven entirely from this
+/// backend: it supplies the instructions (system-prompt.txt) and the HRMS function tools inline on
+/// every request. When the model requests a function tool, the relay runs it in-process (under the
+/// signed-in user's token) and submits the output back, looping until the model returns its final
 /// answer. Conversation continuity uses the Responses API's PreviousResponseId — the relay returns
 /// each response id as the "threadId".
 ///
-/// Auth is Entra ID (the Foundry agents API does not accept an API key); on a personal-account
-/// dev box this is an interactive browser sign-in (cached after the first prompt).
+/// We call the model directly (not a named portal agent) because a named agent rejects inline
+/// tools, and inline tools are what let us execute under the signed-in user's token. Auth is an
+/// API key when configured, else Entra ID (token provider) — never an agent-side OpenAPI callback.
 /// </summary>
 public sealed class AgentService : IAgentService
 {
@@ -36,21 +37,38 @@ public sealed class AgentService : IAgentService
     private static readonly IReadOnlyList<ResponseTool> HrmsTools = new[]
     {
         ResponseTool.CreateFunctionTool(
-            functionName: AgentToolDispatcher.GetTeamAttendance,
+            functionName: AgentToolDispatcher.GetMyAttendance,
             functionParameters: BinaryData.FromString("""
                 {
                   "type": "object",
                   "properties": {
-                    "date": { "type": "string", "description": "The lookup date in YYYY-MM-DD format." },
-                    "team_id": { "type": "integer", "description": "Team identifier. Omit to use the default team." }
+                    "date": { "type": "string", "description": "The lookup date in YYYY-MM-DD format." }
                   },
                   "required": ["date"]
                 }
                 """),
             strictModeEnabled: false,
-            functionDescription: "Get a team's attendance for a single date: a summary plus per-member status "
-                + "(present, absent, leave, weekly_off), check-in/out times, worked/break hours, shift times, and "
-                + "leave details. Read-only. Results reflect the signed-in user's HRMS permissions."),
+            functionDescription: "Get the SIGNED-IN user's own attendance for a single date: status "
+                + "(present, absent, leave, weekly_off, holiday), the day's check-in/out punches, worked/break "
+                + "hours, shift times, and leave type. Read-only. Always for the signed-in user — there is no "
+                + "employee or team argument."),
+
+        ResponseTool.CreateFunctionTool(
+            functionName: AgentToolDispatcher.GetMyMonthlyAttendance,
+            functionParameters: BinaryData.FromString("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "month": { "type": "integer", "description": "Calendar month, 1-12." },
+                    "year": { "type": "integer", "description": "Four-digit year, e.g. 2026." }
+                  },
+                  "required": ["month", "year"]
+                }
+                """),
+            strictModeEnabled: false,
+            functionDescription: "Get the SIGNED-IN user's own attendance summary for a whole month: roll-up "
+                + "counts (present, absent, leave, holiday, weekly off, days offered) plus a per-day list with "
+                + "status, first check-in, last check-out, and worked hours. Read-only; for the signed-in user only."),
 
         ResponseTool.CreateFunctionTool(
             functionName: AgentToolDispatcher.LogAttendance,
@@ -58,26 +76,25 @@ public sealed class AgentService : IAgentService
                 {
                   "type": "object",
                   "properties": {
-                    "employee_code": { "type": "string", "description": "The member's employee code, as returned by getTeamAttendance." },
                     "type": { "type": "string", "enum": ["check_in", "check_out"] },
-                    "team_id": { "type": "integer", "description": "Optional team id; omit to use the default team." },
                     "location": { "type": "string" },
                     "comment": { "type": "string" }
                   },
-                  "required": ["employee_code", "type"]
+                  "required": ["type"]
                 }
                 """),
             strictModeEnabled: false,
-            functionDescription: "Record a LIVE check-in or check-out for one team member AT THE CURRENT TIME. HRMS "
-                + "timestamps the punch on submission, so there is no date/time and it cannot be backdated. ALWAYS "
-                + "confirm with the user before calling."),
+            functionDescription: "Record a LIVE check-in or check-out for the SIGNED-IN user AT THE CURRENT TIME. "
+                + "HRMS timestamps the punch on submission, so there is no date/time and it cannot be backdated. "
+                + "It is always for the signed-in user (no employee argument). ALWAYS confirm before calling."),
     };
 
     private readonly AgentOptions _options;
     private readonly ILogger<AgentService> _logger;
-    private readonly ProjectResponsesClient? _responses;
+    private readonly ResponsesClient? _responses;
+    private readonly string? _instructions;
 
-    public AgentService(IOptions<AgentOptions> options, ILogger<AgentService> logger)
+    public AgentService(IOptions<AgentOptions> options, IHostEnvironment env, ILogger<AgentService> logger)
     {
         _options = options.Value;
         _logger = logger;
@@ -85,13 +102,41 @@ public sealed class AgentService : IAgentService
         if (!_options.IsConfigured)
         {
             _logger.LogWarning(
-                "Agent section is not configured (Agent:ConnectionString empty). The chat relay is disabled.");
+                "Agent section is not configured (Agent:Endpoint/ModelDeploymentName empty). The chat relay is disabled.");
             return;
         }
 
-        var projectClient = new AIProjectClient(new Uri(_options.ConnectionString), BuildCredential());
-        var agentRef = new AgentReference(name: _options.AgentName, version: _options.AgentVersion);
-        _responses = projectClient.OpenAI.GetProjectResponsesClientForAgent(agentRef);
+        _instructions = LoadInstructions(env);
+
+        var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(_options.Endpoint) };
+        if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
+            _logger.LogInformation("Chat relay using API-key auth for model '{Model}'.", _options.ModelDeploymentName);
+            _responses = new ResponsesClient(new ApiKeyCredential(_options.ApiKey), clientOptions);
+        }
+        else
+        {
+            _logger.LogInformation("Chat relay using Entra ID auth for model '{Model}'.", _options.ModelDeploymentName);
+            var tokenPolicy = new BearerTokenPolicy(BuildCredential(), "https://ai.azure.com/.default");
+            _responses = new ResponsesClient(tokenPolicy, clientOptions);
+        }
+    }
+
+    /// <summary>Loads the system-prompt.txt agent instructions from the content root, if present.</summary>
+    private string? LoadInstructions(IHostEnvironment env)
+    {
+        try
+        {
+            var path = Path.Combine(env.ContentRootPath, "system-prompt.txt");
+            if (File.Exists(path))
+                return File.ReadAllText(path);
+            _logger.LogWarning("Instructions file not found at {Path}; the model runs without system instructions.", path);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read the instructions file; the model runs without system instructions.");
+        }
+        return null;
     }
 
     private Azure.Core.TokenCredential BuildCredential()
@@ -100,7 +145,7 @@ public sealed class AgentService : IAgentService
         // prompt happens once. Otherwise DefaultAzureCredential (managed identity in prod, etc.).
         if (_options.InteractiveLogin)
         {
-            _logger.LogInformation("Using interactive browser sign-in for the Foundry agent (dev).");
+            _logger.LogInformation("Using interactive browser sign-in for the model endpoint (dev).");
             return new InteractiveBrowserCredential(new InteractiveBrowserCredentialOptions
             {
                 TenantId = string.IsNullOrWhiteSpace(_options.TenantId) ? null : _options.TenantId,
@@ -117,7 +162,7 @@ public sealed class AgentService : IAgentService
     public Task InitializeAsync(CancellationToken ct = default)
     {
         if (_responses is not null)
-            _logger.LogInformation("Chat relay ready (agent '{Name}' v{Version}).", _options.AgentName, _options.AgentVersion);
+            _logger.LogInformation("Chat relay ready (model '{Model}').", _options.ModelDeploymentName);
         return Task.CompletedTask;
     }
 
@@ -211,16 +256,39 @@ public sealed class AgentService : IAgentService
         yield return new AgentStreamEvent("done", "[DONE]");
     }
 
-    // A request carrying the inline HRMS tools, optionally chained to a prior response. Tools and
-    // InputItems are get-only collections on the options, so they're populated rather than assigned.
-    private static CreateResponseOptions BuildOptions(string? previousResponseId)
+    // A request carrying the model, the system instructions, and the inline HRMS tools, optionally
+    // chained to a prior response. Tools and InputItems are get-only collections on the options, so
+    // they're populated rather than assigned.
+    private CreateResponseOptions BuildOptions(string? previousResponseId)
     {
-        var options = new CreateResponseOptions();
+        var options = new CreateResponseOptions { Model = _options.ModelDeploymentName };
+
+        // The model has no inherent knowledge of "now" — left to itself it anchors near its training
+        // cutoff (e.g. answering "today" as a 2024 date). Inject the authoritative current IST
+        // date/time into the instructions on EVERY turn so all relative-date resolution is correct.
+        var instructions = ComposeInstructions();
+        if (!string.IsNullOrWhiteSpace(instructions))
+            options.Instructions = instructions;
+
         if (!string.IsNullOrWhiteSpace(previousResponseId))
             options.PreviousResponseId = previousResponseId;
         foreach (var tool in HrmsTools)
             options.Tools.Add(tool);
         return options;
+    }
+
+    /// <summary>The static system prompt plus a live "current date/time (IST)" block.</summary>
+    private string ComposeInstructions()
+    {
+        var istNow = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5));
+        var nowBlock =
+            "## CURRENT DATE & TIME (authoritative — overrides any other notion of \"now\")\n" +
+            $"Right now it is {istNow:dddd, MMMM d, yyyy} at {istNow:h:mm tt} IST (UTC+5:30). " +
+            $"Today's date is {istNow:yyyy-MM-dd}. Resolve EVERY relative date or time — \"today\", " +
+            "\"yesterday\", \"this month\", \"last week\" — against this exact value, never against your " +
+            "training data or any guessed date. The current year is " + istNow.ToString("yyyy") + ".";
+
+        return string.IsNullOrWhiteSpace(_instructions) ? nowBlock : _instructions + "\n\n" + nowBlock;
     }
 
     private static ChatResponse Failed(string threadId, string code, string message, string finishReason) =>

@@ -18,8 +18,13 @@ namespace TeamAI.Controllers;
 public sealed class AuthController : ControllerBase
 {
     private readonly IHrmsAuthClient _auth;
+    private readonly IProfileService _profile;
 
-    public AuthController(IHrmsAuthClient auth) => _auth = auth;
+    public AuthController(IHrmsAuthClient auth, IProfileService profile)
+    {
+        _auth = auth;
+        _profile = profile;
+    }
 
     /// <summary>POST /api/v1/auth/login — validate credentials with HRMS and start a session.</summary>
     [HttpPost("login")]
@@ -33,13 +38,13 @@ public sealed class AuthController : ControllerBase
             return Error(result.StatusCode, result.Error ?? "server_error",
                 result.ErrorDescription ?? "Sign-in failed.");
 
-        var profile = JwtReader.ReadProfile(result.AccessToken);
-
         // Identity claims for the cookie principal (display only); the JWT itself is stored as an
-        // auth token so it is encrypted in the cookie and resolvable by TokenManager.
-        var claims = new List<Claim> { new(ClaimTypes.Name, profile.Name ?? body.Username) };
-        if (!string.IsNullOrWhiteSpace(profile.Email)) claims.Add(new Claim(ClaimTypes.Email, profile.Email));
-        if (!string.IsNullOrWhiteSpace(profile.EmployeeId)) claims.Add(new Claim("employeeId", profile.EmployeeId));
+        // auth token so it is encrypted in the cookie and resolvable by TokenManager. The display
+        // name and employee id come from the login response (LoginReturnModel), not the token claims.
+        var displayName = result.DisplayName ?? body.Username;
+        var claims = new List<Claim> { new(ClaimTypes.Name, displayName) };
+        if (result.EmployeeId is { } empId)
+            claims.Add(new Claim("employeeId", empId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
 
@@ -53,6 +58,11 @@ public sealed class AuthController : ControllerBase
         props.StoreTokens(new[] { new AuthenticationToken { Name = AuthConstants.HrmsTokenName, Value = result.AccessToken } });
 
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, props);
+
+        // Enrich from HRMS using the freshly issued token (the session cookie is not yet readable in
+        // this same request). Best-effort: falls back to login basics if the details call fails.
+        var profile = await _profile.BuildProfileAsync(
+            result.AccessToken, result.EmployeeId, displayName, result.PhotoUrl, ct);
 
         return Ok(profile);
     }

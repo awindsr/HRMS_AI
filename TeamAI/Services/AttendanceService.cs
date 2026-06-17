@@ -1,9 +1,8 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
-using TeamAI.Configuration;
 using TeamAI.Models.Hrms;
 using TeamAI.Models.Tools;
 using TeamAI.Services.Interfaces;
@@ -11,9 +10,11 @@ using TeamAI.Services.Interfaces;
 namespace TeamAI.Services;
 
 /// <summary>
-/// The single upstream integration: calls HRMS for one team on one date, then reshapes the
-/// raw envelope into the clean <see cref="TeamAttendance"/> the agent consumes. The HRMS
-/// token, photo URLs, coordinates, and casing quirks never leave this class.
+/// The single upstream integration for the SIGNED-IN user's own attendance: calls HRMS for one
+/// employee on one date (or month), then reshapes the raw envelope into the clean models the agent
+/// consumes. The employee id is ALWAYS the signed-in user's own id, read from their token — the
+/// agent can neither see nor choose it. The HRMS token, photo URLs, coordinates, and casing quirks
+/// never leave this class.
 /// </summary>
 public sealed class AttendanceService : IAttendanceService
 {
@@ -24,58 +25,59 @@ public sealed class AttendanceService : IAttendanceService
         PropertyNameCaseInsensitive = true
     };
 
+    // PascalCase (no naming policy) so the POST body matches the HRMS model exactly.
+    private static readonly JsonSerializerOptions PostJsonOpts = new();
+
     private readonly IHttpClientFactory _httpFactory;
     private readonly ITokenManager _tokenManager;
-    private readonly HrmsOptions _options;
     private readonly ILogger<AttendanceService> _logger;
 
     public AttendanceService(
         IHttpClientFactory httpFactory,
         ITokenManager tokenManager,
-        IOptions<HrmsOptions> options,
         ILogger<AttendanceService> logger)
     {
         _httpFactory = httpFactory;
         _tokenManager = tokenManager;
-        _options = options.Value;
         _logger = logger;
     }
 
-    // PascalCase (no naming policy) so the POST body matches the HRMS model exactly.
-    private static readonly JsonSerializerOptions PostJsonOpts = new();
-
-    public async Task<TeamAttendance> GetTeamAttendanceAsync(
-        DateOnly date, int? teamId = null, CancellationToken ct = default)
+    public async Task<MyAttendance> GetMyAttendanceAsync(DateOnly date, CancellationToken ct = default)
     {
-        var resolvedTeamId = teamId ?? _options.DefaultTeamId;
-        var data = await FetchRawAsync(date, resolvedTeamId, ct);
-        return Reshape(date.ToString("yyyy-MM-dd"), resolvedTeamId, data);
+        var token = await _tokenManager.GetTokenAsync(ct);
+        var employeeId = ResolveEmployeeId(token);
+        var dateStr = date.ToString("yyyy-MM-dd");
+
+        var path = $"/m/api/Attendance/AttendanceBasedOnDate?employeeId={employeeId}&date={dateStr}";
+        var data = await GetAsync<AttendanceDetailResponse>(path, token, $"attendance on {dateStr}", ct);
+        return ReshapeDay(dateStr, data);
+    }
+
+    public async Task<MyMonthlyAttendance> GetMyMonthlyAttendanceAsync(int month, int year, CancellationToken ct = default)
+    {
+        var token = await _tokenManager.GetTokenAsync(ct);
+        var employeeId = ResolveEmployeeId(token);
+
+        var path = $"/m/api/Attendance/MonthlyAttendance?employeeId={employeeId}&month={month}&year={year}";
+        var data = await GetAsync<MonthlyAttendanceResponse>(path, token, $"monthly attendance {month}/{year}", ct);
+        return ReshapeMonth(month, year, data);
     }
 
     public async Task<LogAttendanceResult> LogAttendanceAsync(LogAttendanceInput input, CancellationToken ct = default)
     {
-        var resolvedTeamId = input.TeamId ?? _options.DefaultTeamId;
+        var token = await _tokenManager.GetTokenAsync(ct);
+        var employeeId = ResolveEmployeeId(token);
         var isCheckIn = string.Equals(input.Type, "check_in", StringComparison.OrdinalIgnoreCase);
 
-        // Live punch: HRMS timestamps the punch at submission, so we record "now". We compute
-        // IST (UTC+5:30, the team timezone) for the date/time we send, though HRMS overrides it.
+        // Live punch: HRMS timestamps the punch at submission, so we record "now". We compute IST
+        // (UTC+5:30) for the date/time we send, though HRMS overrides the time itself.
         var istNow = DateTime.UtcNow.AddHours(5.5);
         var today = DateOnly.FromDateTime(istNow);
 
-        // Resolve the member from the team data so we never trust the agent for the internal id.
-        var team = await FetchRawAsync(today, resolvedTeamId, ct);
-        var member = (team.EmployeeDetails ?? new List<EmployeeDetail>())
-            .FirstOrDefault(e => string.Equals(e.EmployeeCode, input.EmployeeCode, StringComparison.OrdinalIgnoreCase));
-
-        if (member is null)
-            return new LogAttendanceResult(false, input.EmployeeCode, "", input.Type,
-                $"No team member with code '{input.EmployeeCode}' was found on the team.");
-
-        var token = await _tokenManager.GetTokenAsync(ct);
         var payload = new AttendanceLogRequest
         {
-            EmployeeId = member.EmployeeId,
-            UserName = member.EmployeeName,                 // best-guess; HRMS field meaning unconfirmed
+            EmployeeId = employeeId,
+            UserName = JwtReader.ReadUserName(token) ?? "",  // HRMS NPEs on a null UserName
             CompanyId = JwtReader.ReadCompanyId(token) ?? 0,
             AttendanceDate = today.ToString("yyyy-MM-dd"),
             CheckInCheckOutTime = istNow.ToString("yyyy-MM-dd HH:mm:ss"), // HRMS ignores this; it stamps now
@@ -88,8 +90,67 @@ public sealed class AttendanceService : IAttendanceService
 
         var (ok, message) = await PostAttendanceLogAsync(payload, token, ct);
         return new LogAttendanceResult(
-            ok, member.EmployeeCode, member.EmployeeName, input.Type,
-            message ?? (ok ? $"Recorded {(isCheckIn ? "check-in" : "check-out")} for {member.EmployeeName}." : "The attendance log was not accepted."));
+            ok, input.Type,
+            message ?? (ok
+                ? $"Recorded your {(isCheckIn ? "check-in" : "check-out")}."
+                : "The attendance log was not accepted."));
+    }
+
+    /// <summary>Reads the signed-in user's own employee id from the token, or fails the call.</summary>
+    private static int ResolveEmployeeId(string token)
+    {
+        var id = JwtReader.ReadEmployeeId(token);
+        if (id is null or 0)
+            throw new HrmsUnauthorizedException("The signed-in user's employee id is missing from the token.");
+        return id.Value;
+    }
+
+    /// <summary>GETs and deserializes an HRMS payload, mapping transport failures to HRMS exceptions.</summary>
+    private async Task<T> GetAsync<T>(string path, string token, string what, CancellationToken ct)
+    {
+        var client = _httpFactory.CreateClient(HrmsClientName);
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request, ct);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("HRMS request for {What} timed out.", what);
+            throw new HrmsUnavailableException("The HRMS API did not respond in time.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "HRMS request for {What} failed.", what);
+            throw new HrmsUnavailableException("Could not reach the HRMS API.", ex);
+        }
+
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+                throw new HrmsUnauthorizedException("HRMS rejected the user's bearer token.");
+            if ((int)response.StatusCode >= 500)
+                throw new HrmsUnavailableException($"HRMS returned HTTP {(int)response.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new HrmsUnavailableException($"HRMS returned an unexpected HTTP {(int)response.StatusCode}.");
+
+            try
+            {
+                var stream = await response.Content.ReadAsStreamAsync(ct);
+                var data = await JsonSerializer.DeserializeAsync<T>(stream, JsonOpts, ct);
+                if (data is null)
+                    throw new HrmsUnavailableException("The HRMS API returned no data.");
+                return data;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "HRMS returned a payload for {What} that could not be parsed.", what);
+                throw new HrmsUnavailableException("The HRMS API returned an unreadable response.", ex);
+            }
+        }
     }
 
     /// <summary>POSTs the attendance log to HRMS. Returns (success, optional HRMS message).</summary>
@@ -120,11 +181,21 @@ public sealed class AttendanceService : IAttendanceService
         using (response)
         {
             if (response.StatusCode == HttpStatusCode.Unauthorized)
-                throw new HrmsUnauthorizedException("HRMS rejected the configured bearer token.");
-            if ((int)response.StatusCode >= 500)
-                throw new HrmsUnavailableException($"HRMS returned HTTP {(int)response.StatusCode}.");
+                throw new HrmsUnauthorizedException("HRMS rejected the user's bearer token.");
+
             if (!response.IsSuccessStatusCode)
-                throw new HrmsUnavailableException($"HRMS returned an unexpected HTTP {(int)response.StatusCode}.");
+            {
+                // Read the upstream body for diagnostics — HRMS often returns a 500 with the actual
+                // cause (e.g. a missing field) in the body. Logged server-side only, never surfaced.
+                string errorBody;
+                try { errorBody = await response.Content.ReadAsStringAsync(ct); }
+                catch { errorBody = "<unreadable>"; }
+                if (errorBody.Length > 800) errorBody = errorBody[..800] + "…";
+                _logger.LogWarning(
+                    "HRMS AttendanceLog failed: HTTP {Status} (EmployeeId={EmployeeId}). Body: {Body}",
+                    (int)response.StatusCode, payload.EmployeeId, errorBody);
+                throw new HrmsUnavailableException($"HRMS returned HTTP {(int)response.StatusCode} for the attendance log.");
+            }
 
             // HRMS replies { "IsMarked": true, "Message": "Attendance Marked", "StatusCode": 200 }.
             try
@@ -151,115 +222,98 @@ public sealed class AttendanceService : IAttendanceService
         }
     }
 
-    /// <summary>Fetches and deserializes the raw HRMS team-attendance payload for a date.</summary>
-    private async Task<AttendanceData> FetchRawAsync(DateOnly date, int teamId, CancellationToken ct)
+    // ---- Pure reshaping (raw HRMS -> clean agent models) ----
+
+    private static MyAttendance ReshapeDay(string date, AttendanceDetailResponse data)
     {
-        var dateStr = date.ToString("yyyy-MM-dd");
+        var shift = data.ShiftAndAttendanceLog;
+        var summary = data.AttendanceSummary;
+        var status = NormalizeStatus(data.Status, data.DayType);
 
-        // reportingType is a *quoted* string on the wire: "1" -> %221%22. Wrap then escape so
-        // the literal quotes survive. Date is date-only (no time component).
-        var reportingType = Uri.EscapeDataString($"\"{_options.DefaultReportingType}\"");
-        var relativePath =
-            $"/m/api/Attendance/team-attendance?employeeId={teamId}&date={dateStr}&reportingType={reportingType}";
-
-        var token = await _tokenManager.GetTokenAsync(ct);
-
-        var client = _httpFactory.CreateClient(HrmsClientName);
-        using var request = new HttpRequestMessage(HttpMethod.Get, relativePath);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await client.SendAsync(request, ct);
-        }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("HRMS request timed out for team {TeamId} on {Date}.", teamId, dateStr);
-            throw new HrmsUnavailableException("The HRMS API did not respond in time.", ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogWarning(ex, "HRMS request failed for team {TeamId} on {Date}.", teamId, dateStr);
-            throw new HrmsUnavailableException("Could not reach the HRMS API.", ex);
-        }
-
-        using (response)
-        {
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
-                throw new HrmsUnauthorizedException("HRMS rejected the configured bearer token.");
-
-            if ((int)response.StatusCode >= 500)
-                throw new HrmsUnavailableException($"HRMS returned HTTP {(int)response.StatusCode}.");
-
-            if (!response.IsSuccessStatusCode)
-                throw new HrmsUnavailableException($"HRMS returned an unexpected HTTP {(int)response.StatusCode}.");
-
-            TeamAttendanceResponse? raw;
-            try
-            {
-                var stream = await response.Content.ReadAsStreamAsync(ct);
-                raw = await JsonSerializer.DeserializeAsync<TeamAttendanceResponse>(stream, JsonOpts, ct);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "HRMS returned a payload that could not be parsed.");
-                throw new HrmsUnavailableException("The HRMS API returned an unreadable response.", ex);
-            }
-
-            var data = raw?.Response;
-            if (data is null)
-                throw new HrmsUnavailableException("The HRMS API returned no attendance data.");
-
-            return data;
-        }
-    }
-
-    /// <summary>Pure transformation of raw HRMS data into the clean agent-facing shape.</summary>
-    private static TeamAttendance Reshape(string date, int teamId, AttendanceData data)
-    {
-        var details = data.EmployeeDetails ?? new List<EmployeeDetail>();
-        var employees = details.Select(MapEmployee).ToList();
-
-        var summary = new AttendanceSummary(
-            Total: employees.Count,
-            Present: employees.Count(e => e.Status == "present"),
-            Absent: employees.Count(e => e.Status == "absent"),
-            OnLeave: data.OnLeave,
-            OnWeeklyOff: data.OnWeeklyOff,
-            NotReported: data.NotReported);
-
-        return new TeamAttendance(date, teamId, summary, employees);
-    }
-
-    private static EmployeeAttendance MapEmployee(EmployeeDetail e)
-    {
-        var status =
-            e.IsLeave ? "leave" :
-            e.IsWeeklyOff ? "weekly_off" :
-            e.IsAbsent ? "absent" :
-            "present";
+        var punches = (shift?.AttendanceLog ?? new List<AttendanceLogEntry>())
+            .Select(p => new AttendancePunch(
+                CheckIn: FormatTime(p.CheckInTime),
+                CheckOut: FormatTime(p.CheckOutTime),
+                CheckInLocation: NullIfBlank(p.CheckInLocation),
+                CheckOutLocation: NullIfBlank(p.CheckOutLocation)))
+            .Where(p => p.CheckIn is not null || p.CheckOut is not null)
+            .ToList();
 
         var onLeave = status == "leave";
-        return new EmployeeAttendance(
-            Name: e.EmployeeName?.Trim() ?? "",
-            EmployeeCode: e.EmployeeCode,
+        return new MyAttendance(
+            Date: date,
             Status: status,
-            CheckInTime: e.CheckinTime,
-            CheckOutTime: e.CheckOutTime,
-            WorkedHours: NormalizeHours(e.WorkedHours),
-            BreakHours: NormalizeHours(e.BreakHours),
-            ShiftStart: e.ShiftStartTime,
-            ShiftEnd: e.ShiftEndTime,
-            // Leave-specific fields only when actually on leave (HRMS leaves them null otherwise).
-            LeaveType: onLeave ? e.LeaveType : null,
-            LeaveReason: onLeave ? e.LeaveReason : null,
-            LeaveStartDate: onLeave ? e.LeaveStartDate : null,
-            LeaveToDate: onLeave ? e.LeaveToDate : null,
-            LeaveHours: onLeave ? NormalizeHours(e.LeaveHours) : null);
+            DayType: NullIfBlank(data.DayType),
+            ShiftStart: NullIfBlank(shift?.ShiftStartTime),
+            ShiftEnd: NullIfBlank(shift?.ShiftEndTime),
+            WorkedHours: NormalizeHours(summary?.WorkedHours),
+            BreakHours: NormalizeHours(summary?.BreakHours),
+            LeaveHours: onLeave ? NormalizeHours(summary?.LeaveHours) : null,
+            LeaveType: onLeave ? NullIfBlank(data.LeaveTypeName) : null,
+            Punches: punches);
     }
 
-    // HRMS uses the placeholder "--:--" for an absent member's worked hours; surface it as null.
-    private static string? NormalizeHours(string? hours) =>
-        string.IsNullOrWhiteSpace(hours) || hours == "--:--" ? null : hours;
+    private static MyMonthlyAttendance ReshapeMonth(int month, int year, MonthlyAttendanceResponse data)
+    {
+        var s = data.AttendanceSummary;
+        var summary = new MonthlySummary(
+            Offered: s?.Offered ?? 0,
+            Present: s?.Present ?? 0,
+            Absent: s?.Absent ?? 0,
+            Leave: s?.Leave ?? 0,
+            Holiday: s?.Holiday ?? 0,
+            WeeklyOff: s?.WeeklyOff ?? 0);
+
+        var days = (data.MonthlyAttendance ?? new List<MonthlyAttendanceDay>())
+            .Select(d => new MyMonthlyDay(
+                Date: d.Date.ToString("yyyy-MM-dd"),
+                Status: NormalizeStatus(d.AttendanceStatus, d.DayType),
+                FirstCheckIn: NormalizeHours(d.FirstCheckInTime),
+                LastCheckOut: NormalizeHours(d.LastCheckOutTime),
+                WorkedHours: NormalizeHours(d.TotalWorkedHours)))
+            .ToList();
+
+        return new MyMonthlyAttendance(month, year, summary, days);
+    }
+
+    // Maps HRMS status/day-type strings onto the agent's fixed vocabulary:
+    // present | absent | leave | weekly_off | holiday | not_reported. Unknown values fall through
+    // as a lower-cased, underscored token so nothing is silently lost.
+    private static string NormalizeStatus(string? status, string? dayType)
+    {
+        var s = (status ?? "").Trim().ToLowerInvariant().Replace(" ", "");
+        return s switch
+        {
+            "present" or "p" => "present",
+            "absent" or "a" => "absent",
+            "leave" or "onleave" or "l" => "leave",
+            "weeklyoff" or "weeklyholiday" or "wo" => "weekly_off",
+            "holiday" or "publicholiday" or "h" => "holiday",
+            "notreported" or "notmarked" or "" => NormalizeDayType(dayType),
+            _ => s.Replace("/", "_"),
+        };
+    }
+
+    private static string NormalizeDayType(string? dayType)
+    {
+        var d = (dayType ?? "").Trim().ToLowerInvariant().Replace(" ", "");
+        return d switch
+        {
+            "weeklyoff" or "weeklyholiday" => "weekly_off",
+            "holiday" or "publicholiday" => "holiday",
+            "" => "not_reported",
+            _ => "not_reported",
+        };
+    }
+
+    private static string? FormatTime(DateTime? value) =>
+        value is { } dt ? dt.ToString("HH:mm", CultureInfo.InvariantCulture) : null;
+
+    // HRMS uses the placeholder "--:--" (and blanks) for missing hours/times; surface as null. A
+    // real "00:00" is preserved — it means a genuine zero, not "unavailable".
+    private static string? NormalizeHours(string? value) =>
+        string.IsNullOrWhiteSpace(value) || value.Trim() == "--:--" ? null : value.Trim();
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

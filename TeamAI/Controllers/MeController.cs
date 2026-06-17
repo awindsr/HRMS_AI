@@ -16,13 +16,24 @@ namespace TeamAI.Controllers;
 public sealed class MeController : ControllerBase
 {
     private readonly ITokenManager _tokens;
+    private readonly IProfileService _profile;
 
-    public MeController(ITokenManager tokens) => _tokens = tokens;
+    public MeController(ITokenManager tokens, IProfileService profile)
+    {
+        _tokens = tokens;
+        _profile = profile;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
     {
         var token = await _tokens.GetTokenAsync(ct);
-        return Ok(JwtReader.ReadProfile(token));
+
+        // Employee id from the cookie principal (set at sign-in), falling back to the token claim.
+        int? employeeId = int.TryParse(User.FindFirst("employeeId")?.Value, out var id) ? id : null;
+        var fallbackName = User.Identity?.Name;
+
+        var profile = await _profile.BuildProfileAsync(token, employeeId, fallbackName, null, ct);
+        return Ok(profile);
     }
 }

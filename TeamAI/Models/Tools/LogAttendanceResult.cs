@@ -1,9 +1,7 @@
 namespace TeamAI.Models.Tools;
 
-/// <summary>Result of a LIVE logAttendance punch, for the agent to confirm back to the user.</summary>
+/// <summary>Result of a LIVE logAttendance punch for the signed-in user, for the agent to confirm back.</summary>
 public record LogAttendanceResult(
     bool Success,
-    string EmployeeCode,
-    string EmployeeName,
     string Type,        // check_in | check_out
     string Message);

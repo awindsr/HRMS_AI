@@ -5,7 +5,7 @@ using TeamAI.Services.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- Configuration: bind the Hrms section (BaseUrl/team defaults; the bearer token is per-user) ---
+// --- Configuration: bind the Hrms section (BaseUrl only; the bearer token is per-user) ---
 builder.Services.AddOptions<HrmsOptions>()
     .Bind(builder.Configuration.GetSection(HrmsOptions.Section))
     .ValidateOnStart();
@@ -35,6 +35,9 @@ builder.Services.AddHttpClient("VoyonFolks", client =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITokenManager, TokenManager>();
 builder.Services.AddScoped<IAttendanceService, AttendanceService>();
+
+// Builds the signed-in user's display profile, enriched from HRMS GetEmployeeDetails (best-effort).
+builder.Services.AddScoped<IProfileService, HrmsProfileService>();
 
 // Executes the agent's function-tool calls in-process during the chat request, so each HRMS call
 // runs under the signed-in user's token (replaces the old Foundry-side OpenAPI tool callback).
